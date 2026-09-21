@@ -1,0 +1,46 @@
+# Threat Model
+
+Status: living document, maintained **before** production-grade storage or
+networking is implemented.
+
+Scope: the authorization engine (evaluator, policy and relationship stores,
+future control/data planes). The application using the engine is in-scope only
+at the integration boundary.
+
+## Threats and mitigations
+
+| #   | Threat                                                                        | Mitigation                                                                                                                                                                                | Status                                          |
+| --- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 1   | **Policy tampering** (malicious/unauthorized policy change)                   | Immutable versioned artifacts; publication authz (Phase 9 governance); eventually signed artifacts verified by the data plane                                                             | Partially designed                              |
+| 2   | **Relationship tampering** (forged/granted relationships)                     | Relationship writes are authorized mutations (future Relationship API with authz + idempotency); audit trail on writes                                                                    | Designed, unimplemented                         |
+| 3   | **Tenant isolation failure** (cross-tenant reads/writes, inheritance leakage) | Tenant-scoped records; edges validated at write time; adversarial security tests from Phase 2; eventual static validation                                                                 | Binding invariant, tested from Phase 2          |
+| 4   | **Stale authorization data** (revocation lag)                                 | Explicit consistency semantics (eventual/bounded/strong); cache keys include state versions; negative caching stricter than positive (`../architecture/caching.md`)                       | Designed                                        |
+| 5   | **Cache poisoning**                                                           | Decisions cached only from verified evaluations; keys include policy+relationship versions; caches never shared across tenants                                                            | Designed                                        |
+| 6   | **Confused deputy** (engine misused with elevated context)                    | Context is data, validated against policy-declared schemas; subject identity supplied by the caller boundary, documented as caller responsibility; delegation is an explicit relationship | Designed                                        |
+| 7   | **Privilege escalation** via policy/graph combination                         | Bounded traversal; static analysis goal (`authz validate`); fuzz testing goal (`authz fuzz`, later phases)                                                                                | Deferred (designed)                             |
+| 8   | **Policy rollback attacks** (reintroducing old permissive versions)           | Versioning is append-only; activation requires explicit deployment action; audit of activations                                                                                           | Designed                                        |
+| 9   | **Compromised API credentials**                                               | Credential rotation, scoping, least privilege (control-plane concern, Phase 8)                                                                                                            | Deferred                                        |
+| 10  | **Malicious policy changes** (insider)                                        | Governance workflow: PR → policy tests → review → approval → staged deploy (Phase 9)                                                                                                      | Designed                                        |
+| 11  | **Explanation information leakage**                                           | Disclosure levels (`none/minimal/standard/debug`); access to higher levels itself authorized (`../design/explanations.md`)                                                                | Designed, tested from Phase 2                   |
+| 12  | **Denial-of-service**                                                         | Request size/batch/traversal bounds; pathological inputs ⇒ explained DENY; rate limiting at service boundary (Phase 8)                                                                    | Bounds designed now; service hardening deferred |
+| 13  | **Malformed policies**                                                        | Validation at publish time; publish-time rejection; loaded artifacts fail closed                                                                                                          | Binding invariant                               |
+| 14  | **Cyclic relationship graphs**                                                | Cycle detection terminates paths — no non-termination; cycles ⇒ branch `unknown` ⇒ deny                                                                                                   | Binding invariant, tested from Phase 2          |
+| 15  | **Pathological evaluation complexity**                                        | Depth/fan-out bounds; compiled evaluation plans (Phase 3+); benchmarks before performance claims                                                                                          | Partially designed                              |
+| 16  | **Evaluation error ⇒ silent allow**                                           | Default-deny (ADR-0006): every error path yields DENY or typed infrastructure error; dedicated tests                                                                                      | Binding invariant, tested from Phase 2          |
+| 17  | **Sensitive data in the engine** (PII)                                        | PII minimization: opaque subject IDs; no names/emails required; observability obeys privacy constraints                                                                                   | Binding principle                               |
+
+## Unresolved risks (open questions)
+
+- Exact consistency guarantees and their cost (roadmap consistency-model
+  phases) — not yet decided.
+- Effective cache invalidation at large graph scale — a research problem
+  (roadmap Phase 47), not solved by TTL.
+- Explanation leakage under adversarial querying at `standard` level — needs
+  formal analysis when explanations are implemented.
+- Threats from future feature growth (temporal grants, delegation, external
+  principals) — each feature must update this document before implementation.
+
+## Process
+
+Every security-relevant feature lands with: updated threat model rows,
+security tests, and (if design changed) an ADR.
