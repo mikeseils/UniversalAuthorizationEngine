@@ -14,13 +14,18 @@ secrets/local DBs.
 identifiers, `AuthorizationRequest`, `AuthorizationDecision` (draft shapes,
 documented as non-final), identifier parsing/validation, invariants tests.
 
-## Phase 2 — In-memory evaluator 🔜 Planned
+## Phase 2 — In-memory evaluator ✅ Implemented
 
-Simple structured policy representation; in-memory `RelationshipStore` and
-`PolicyStore`; deterministic evaluator; allow/deny; explanations (same pass as
-decision); explanation detail levels; bounded traversal; cycle safety;
-integration tests with the canonical Acme example; security tests (tenant
-isolation, malformed inputs, default-deny error paths).
+Structured policy representation, validation, compilation (content-hashed,
+immutable `VersionedPolicy` artifacts) and the in-memory `PolicyStore`
+(`packages/policy`); in-memory `RelationshipStore` with snapshot-consistent
+reads and a `relationshipVersion` counter; the deterministic `Evaluator` with
+three-valued semantics (true/false/unknown → deny), bounded cycle-safe ReBAC
+traversal, `indirect` inheritance, context conditions, same-pass explanations
+with disclosure levels, `check()` + `checkBatch()`, provenance fields
+(`policyVersion`); unit, integration, and security test suites (tenant
+isolation, fail-closed error paths, cycles, bounds, batch, explanations —
+108 tests). See ADR-0009/0010/0011.
 
 ## Phase 3 — Policy language 🔜 Planned
 

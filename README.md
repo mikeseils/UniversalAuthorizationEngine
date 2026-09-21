@@ -54,16 +54,17 @@ if (!decision.allowed) {
 
 ## Implementation status
 
-| Area                                    | Status                         |
-| --------------------------------------- | ------------------------------ |
-| Repository, tooling, CI, documentation  | **Implemented**                |
-| Domain model & core types (`@uae/core`) | **Implemented** (draft shapes) |
-| In-memory evaluator, explanations       | Planned (Phase 2)              |
-| Policy language, parser, compiler       | Planned (Phase 3)              |
-| CLI (`authz validate/test/check`)       | Planned (Phase 4)              |
-| SDK                                     | Planned (Phase 5)              |
-| Persistence, caching, benchmarks        | Planned (Phases 6–7)           |
-| Hosted / self-hosted service            | Planned (Phase 8+)             |
+| Area                                                  | Status                         |
+| ----------------------------------------------------- | ------------------------------ |
+| Repository, tooling, CI, documentation                | **Implemented**                |
+| Domain model & core types (`@uae/core`)               | **Implemented** (draft shapes) |
+| Structured policy + versioned store (`@uae/policy`)   | **Implemented** (draft shapes) |
+| In-memory evaluator + explanations (`@uae/evaluator`) | **Implemented** (draft shapes) |
+| Policy language, parser, compiler                     | Planned (Phase 3)              |
+| CLI (`authz validate/test/check`)                     | Planned (Phase 4)              |
+| SDK                                                   | Planned (Phase 5)              |
+| Persistence, caching, benchmarks                      | Planned (Phases 6–7)           |
+| Hosted / self-hosted service                          | Planned (Phase 8+)             |
 
 No feature is claimed as implemented above unless it exists in this
 repository. Full detail: `docs/development/roadmap.md`.
@@ -94,8 +95,8 @@ More: `docs/development/local-development.md`.
 │   └── security/          Threat model, security principles
 ├── packages/
 │   ├── core/              Domain types + store interfaces (zero dependencies)
-│   ├── policy/            Planned — policy parsing/validation/versioning
-│   ├── evaluator/         Planned — deterministic decision engine
+│   ├── policy/            Structured policy, validation, versioned store
+│   ├── evaluator/         Deterministic evaluator + explanations
 │   ├── sdk/               Planned — client API
 │   └── cli/               Planned — authz CLI
 ├── examples/acme/         Canonical example domain (fixtures)
