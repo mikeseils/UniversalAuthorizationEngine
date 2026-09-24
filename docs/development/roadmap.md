@@ -27,11 +27,24 @@ with disclosure levels, `check()` + `checkBatch()`, provenance fields
 isolation, fail-closed error paths, cycles, bounds, batch, explanations —
 108 tests). See ADR-0009/0010/0011.
 
-## Phase 3 — Policy language 🔜 Planned
+## Phase 3 — Policy language ✅ Implemented (v1)
 
-Final language decision ADR (extends ADR-0008 study); parser, AST, validation,
-compiled policy artifacts, versioning; `authz validate` semantics designed;
-static analysis groundwork.
+Policy language v1 decided in **ADR-0012** (small declarative ReBAC syntax,
+Zanzibar/OpenFGA lineage; `not`, arithmetic, functions, and permission
+composition deliberately excluded). Implemented in `packages/policy`: lexer
+(token positions, BOM tolerance, 256 KB source cap), recursive-descent parser
+with located errors, AST, lowering (`targetType.permission` traversals resolved
+from relation declarations — ambiguity is a validation error, never a guess),
+the source pipeline (`compilePolicySource`: parse → lower → validate → compile),
+and `InMemoryPolicyStore` accepting **text or structured** source through one
+publish path. The canonical policy is authored in the language at
+`examples/acme/policy.authz`.
+
+Tests: lexer/parser error cases and positions, publish-time rejection of
+malformed and oversized source, and **cross-representation equivalence** (the
+text Acme policy produces identical decisions to the programmatic one across
+every case) — 145 tests total. Static analysis (`authz analyze`) and the
+language-maturity items of Phase 13 remain **Planned**.
 
 ## Phase 4 — CLI 🔜 Planned
 
