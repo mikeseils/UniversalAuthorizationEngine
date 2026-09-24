@@ -8,6 +8,19 @@ export interface PolicyValidationResult {
   readonly warnings: readonly string[];
 }
 
+/** Raised when a policy fails structural validation (see ADR-0009). */
+export class PolicyValidationError extends Error {
+  public readonly errors: readonly string[];
+  public readonly warnings: readonly string[];
+
+  constructor(errors: readonly string[], warnings: readonly string[] = []) {
+    super(`policy validation failed: ${errors.join("; ")}`);
+    this.name = "PolicyValidationError";
+    this.errors = errors;
+    this.warnings = warnings;
+  }
+}
+
 const RELATION_RE = /^[a-z][a-z0-9_]*$/;
 const PERMISSION_RE = /^[a-z][a-z0-9_]*$/;
 const TYPE_RE = /^[a-z][a-z0-9_-]*$/;

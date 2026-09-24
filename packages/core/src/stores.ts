@@ -13,11 +13,28 @@ export interface VersionedPolicy {
   readonly hash: string;
   /** Compiled policy body; opaque at this layer. */
   readonly artifact: unknown;
+  /**
+   * Non-fatal findings recorded at publish time (e.g. validation warnings).
+   * Warnings are surfaced, never silently discarded, but they never change
+   * whether a policy was accepted.
+   */
+  readonly warnings?: readonly string[];
 }
+
+/**
+ * How {@link PolicySource.source} is expressed (ADR-0012):
+ * - `structured` — the compiled representation's input shape (programmatic);
+ * - `text` — policy language source (ADR-0012 syntax).
+ * When omitted, a string `source` is treated as `text` and anything else as
+ * `structured`, so both authoring styles reach the same publish path.
+ */
+export type PolicySourceFormat = "structured" | "text";
 
 /** Source policy awaiting compilation/validation (publish-time input). */
 export interface PolicySource {
-  /** Structured policy content (Phase 2); source syntax arrives in Phase 3. */
+  /** Optional explicit format; inferred from the `source` value when absent. */
+  readonly format?: PolicySourceFormat;
+  /** Structured policy content, or policy-language text when `format` is `text`. */
   readonly source: unknown;
 }
 

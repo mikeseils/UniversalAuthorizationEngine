@@ -1,0 +1,37 @@
+// Canonical example policy (ADR-0012) for the Acme domain
+// (docs/design/domain-model.md). This is the text-language twin of the
+// programmatic ACME_POLICY in tests/helpers.ts; policy-language.test.ts
+// asserts both produce identical decisions for every check.
+//
+// Edge direction is declared, never guessed: a `via` clause names the edge
+// on the *target* side, so `relation organization: organization via owns`
+// means "the organization side of the `owns` edge points at this resource".
+
+definition organization {
+  relation admin: user
+  relation member: user
+
+  permission manage = admin
+  permission read = admin or member
+}
+
+definition project {
+  // The owning organization (incoming `owns` edge: org --owns--> project).
+  relation organization: organization via owns
+  relation owner: user
+  relation editor: user
+  relation viewer: user
+
+  permission read = viewer or editor or owner or organization.read
+  permission write = editor or owner
+  permission delete = owner or organization.manage
+}
+
+definition document {
+  // The containing project (incoming `contains` edge: project --contains--> doc).
+  relation project: project via contains
+
+  permission read = project.read
+  permission delete = project.delete
+}
+

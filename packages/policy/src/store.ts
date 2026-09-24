@@ -1,9 +1,12 @@
-﻿import { PolicySource, PolicyStore, VersionedPolicy } from "@uae/core";
-import { compileStructuredPolicy, isCompiledArtifactShape } from "./compile.js";
+import { PolicySource, PolicyStore, VersionedPolicy } from "@uae/core";
+import { CompiledPolicy, compileStructuredPolicy, isCompiledArtifactShape } from "./compile.js";
+import { PolicyLoweringError } from "./lower.js";
+import { PolicySyntaxError } from "./lexer.js";
+import { compilePolicySource } from "./source.js";
 import { StructuredPolicy } from "./structured-policy.js";
-import { validateStructuredPolicy } from "./validate.js";
+import { PolicyValidationError, validateStructuredPolicy } from "./validate.js";
 
-/** Typed infrastructure error (distinct from a DENY â€” ADR-0010). */
+/** Typed infrastructure error (distinct from a DENY — ADR-0010). */
 export class PolicyStoreError extends Error {
   constructor(message: string) {
     super(message);
@@ -15,12 +18,57 @@ function policyError(message: string): PolicyStoreError {
   return new PolicyStoreError(message);
 }
 
+interface PublishablePolicy extends CompiledPolicy {
+  readonly warnings: readonly string[];
+}
+
+/** Authoring failures share one typed error at the publish boundary. */
+function asAuthoringError(error: unknown): never {
+  if (
+    error instanceof PolicySyntaxError ||
+    error instanceof PolicyLoweringError ||
+    error instanceof PolicyValidationError
+  ) {
+    throw policyError(error.message);
+  }
+  throw error;
+}
+
+/**
+ * Resolve a `PolicySource` to a validated, compiled policy. Format is explicit
+ * when provided, otherwise inferred: a string is text, anything else is
+ * structured (ADR-0012) — so both authoring styles reach the same publish path.
+ */
+function resolvePolicy(policy: PolicySource): PublishablePolicy {
+  const format = policy.format ?? (typeof policy.source === "string" ? "text" : "structured");
+  if (format === "text") {
+    if (typeof policy.source !== "string") {
+      throw policyError("policy source declared as text but is not a string");
+    }
+    try {
+      return compilePolicySource(policy.source);
+    } catch (error) {
+      asAuthoringError(error);
+    }
+  }
+  if (typeof policy.source === "string") {
+    throw policyError("policy source declared as structured but is a string");
+  }
+  const validation = validateStructuredPolicy(policy.source);
+  if (!validation.valid) {
+    throw policyError(`policy rejected: ${validation.errors.join("; ")}`);
+  }
+  const { artifact, hash } = compileStructuredPolicy(policy.source as StructuredPolicy);
+  return { artifact, hash, warnings: validation.warnings };
+}
+
 /**
  * In-memory, append-only policy store (Phase 2 implementation of the core
  * `PolicyStore` interface, docs/architecture/storage.md).
  *
- * - `publishPolicy` validates + compiles and stores a new immutable version.
- * - Version activation is explicit (`setActiveVersion`) â€” activation is a
+ * - `publishPolicy` accepts policy text (ADR-0012) or a structured policy,
+ *   validates + compiles it, and stores a new immutable version.
+ * - Version activation is explicit (`setActiveVersion`) — activation is a
  *   deliberate deployment act, never a side effect of publishing.
  */
 export class InMemoryPolicyStore implements PolicyStore {
@@ -42,17 +90,23 @@ export class InMemoryPolicyStore implements PolicyStore {
   }
 
   publishPolicy(policy: PolicySource): Promise<VersionedPolicy> {
-    const validation = validateStructuredPolicy(policy.source);
-    if (!validation.valid) {
-      return Promise.reject(policyError(`policy rejected: ${validation.errors.join("; ")}`));
+    let resolved: PublishablePolicy;
+    try {
+      resolved = resolvePolicy(policy);
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new PolicyStoreError(String(error)));
+    }
+    if (!isCompiledArtifactShape(resolved.artifact)) {
+      return Promise.reject(policyError("compiled artifact failed structural re-check"));
     }
     const version = String(this.nextVersionNumber);
     this.nextVersionNumber += 1;
-    const { artifact, hash } = compileStructuredPolicy(policy.source as StructuredPolicy);
-    if (!isCompiledArtifactShape(artifact)) {
-      return Promise.reject(policyError("compiled artifact failed structural re-check"));
-    }
-    const versioned: VersionedPolicy = Object.freeze({ version, hash, artifact });
+    const versioned: VersionedPolicy = Object.freeze({
+      version,
+      hash: resolved.hash,
+      artifact: resolved.artifact,
+      ...(resolved.warnings.length === 0 ? {} : { warnings: resolved.warnings }),
+    });
     this.versions.set(version, versioned);
     return Promise.resolve(versioned);
   }
