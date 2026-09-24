@@ -30,7 +30,7 @@ describe("fail-closed error paths (ADR-0006, ADR-0010)", () => {
     ).rejects.toThrow(/relationship store down/);
   });
 
-  it("defective loaded policy artifact â†’ explained DENY with reason 'error'", async () => {
+  it("defective loaded policy artifact → explained DENY with reason 'error'", async () => {
     const { evaluator, policyStore } = acmeSetup();
     await publishAndActivate(policyStore);
     // Simulate tampered/corrupt artifact stored under an activated version.

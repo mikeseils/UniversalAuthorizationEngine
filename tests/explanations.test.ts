@@ -9,7 +9,7 @@ const setup = async () => {
 };
 
 describe("explanations (ADR-0011)", () => {
-  it("default level is none â€” no leakage by default", async () => {
+  it("default level is none — no leakage by default", async () => {
     const evaluator = await setup();
     const decision = await check(evaluator, "user:bob", "document.read", "document:a");
     expect(decision.explanation).toBeUndefined();

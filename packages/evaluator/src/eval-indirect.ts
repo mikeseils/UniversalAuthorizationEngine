@@ -15,7 +15,7 @@ import {
 /**
  * Bounded, cycle-safe ReBAC traversal (ADR-0010):
  * "subject has `permission` on X, where X is linked to `resource` by `relation`".
- * No candidates â†’ `false`; bound exceeded or cycle revisit â†’ `unknown`.
+ * No candidates → `false`; bound exceeded or cycle revisit → `unknown`.
  */
 export async function evalIndirect(
   expr: IndirectRef,
