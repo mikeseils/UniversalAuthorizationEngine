@@ -1,4 +1,6 @@
-import { AuthorizationRequest } from "../packages/core/src/index.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { AuthorizationRequest, PolicySource } from "../packages/core/src/index.js";
 import {
   InMemoryPolicyStore,
   StructuredPolicy,
@@ -70,9 +72,17 @@ export interface AcmeSetup {
   policyStore: InMemoryPolicyStore;
   relationships: InMemoryRelationshipStore;
   evaluator: Evaluator;
+  /** The policy source this setup is configured to publish. */
+  policy: PolicySource;
 }
 
-export function acmeSetup(_policy: StructuredPolicy = ACME_POLICY): AcmeSetup {
+/**
+ * Build the canonical Acme scenario: relationships from the fixture plus an
+ * evaluator wired to fresh stores. The policy is not published here — call
+ * {@link publishAndActivate} with the same setup so the source can be text
+ * (ADR-0012) or structured, and both reach the identical publish path.
+ */
+export function acmeSetup(policy: PolicySource = { source: ACME_POLICY }): AcmeSetup {
   const policyStore = new InMemoryPolicyStore();
   const relationships = new InMemoryRelationshipStore();
   relationships.addAll(
@@ -85,15 +95,33 @@ export function acmeSetup(_policy: StructuredPolicy = ACME_POLICY): AcmeSetup {
     policyStore,
     relationshipStore: relationships.asRelationshipStore(),
   });
-  return { policyStore, relationships, evaluator };
+  return { policyStore, relationships, evaluator, policy };
 }
 
-/** Publish + activate a policy, returning the active version string. */
+/** Publish + activate a policy source, returning the active version string. */
 export async function publishAndActivate(
   store: InMemoryPolicyStore,
-  policy: StructuredPolicy = ACME_POLICY,
+  policy: PolicySource = { source: ACME_POLICY },
 ): Promise<string> {
-  const versioned = await store.publishPolicy({ source: policy });
+  const versioned = await store.publishPolicy(policy);
+  store.setActiveVersion(versioned.version);
+  return versioned.version;
+}
+
+/** The canonical Acme policy written in the ADR-0012 text language. */
+export function readAcmePolicyText(): string {
+  return readFileSync(
+    fileURLToPath(new URL("../examples/acme/policy.authz", import.meta.url)),
+    "utf8",
+  );
+}
+
+/** Publish policy *text* (ADR-0012) + activate it, returning the version. */
+export async function publishTextAndActivate(
+  store: InMemoryPolicyStore,
+  text: string,
+): Promise<string> {
+  const versioned = await store.publishPolicy({ source: text, format: "text" });
   store.setActiveVersion(versioned.version);
   return versioned.version;
 }

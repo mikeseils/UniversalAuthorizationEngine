@@ -9,13 +9,16 @@ import {
   relationRef,
 } from "../packages/policy/src/index.js";
 import { DEFAULT_LIMITS, Evaluator } from "../packages/evaluator/src/index.js";
-import { acmeSetup, check, publishAndActivate } from "./helpers.js";
+import { ACME_POLICY, acmeSetup, check, publishAndActivate } from "./helpers.js";
 
-async function evaluatorFor(policy: StructuredPolicy, limits?: Partial<typeof DEFAULT_LIMITS>) {
-  const { policyStore, relationships, evaluator } = acmeSetup(policy);
+async function evaluatorFor(
+  policy: StructuredPolicy = ACME_POLICY,
+  limits?: Partial<typeof DEFAULT_LIMITS>,
+) {
+  const { policyStore, relationships, evaluator } = acmeSetup({ source: policy });
   // approver edge for the context-condition test policy (harmless for Acme)
   relationships.add({ subject: "user:alice", relation: "approver", resource: "invoice:1" });
-  await publishAndActivate(policyStore, policy);
+  await publishAndActivate(policyStore, { source: policy });
   const configured = limits
     ? new Evaluator({
         policyStore,
@@ -59,7 +62,7 @@ describe("three-valued connective semantics (ADR-0010)", () => {
     },
   };
 
-  it("missing context key â†’ condition unknown â†’ DENY", async () => {
+  it("missing context key → condition unknown → DENY", async () => {
     const { evaluator } = await evaluatorFor(policy);
     const decision = await check(evaluator, "user:alice", "invoice.approve", "invoice:1");
     expect(decision.allowed).toBe(false);
@@ -76,7 +79,7 @@ describe("three-valued connective semantics (ADR-0010)", () => {
     expect(decision.allowed).toBe(true);
   });
 
-  it("`not unknown` stays unknown â†’ negation cannot weaponize missing data", async () => {
+  it("`not unknown` stays unknown → negation cannot weaponize missing data", async () => {
     const { evaluator } = await evaluatorFor(policy);
     const decision = await evaluator.check({
       subject: "user:alice",
@@ -110,7 +113,7 @@ describe("bounded evaluation", () => {
     return { definitions };
   }
 
-  it("deep chains beyond maxTraversalDepth yield explained unknown â†’ DENY", async () => {
+  it("deep chains beyond maxTraversalDepth yield explained unknown → DENY", async () => {
     const depth = 15;
     const { evaluator, relationships } = await evaluatorFor(chainPolicy(depth), {
       maxTraversalDepth: 5,
