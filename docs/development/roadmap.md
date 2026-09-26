@@ -88,11 +88,40 @@ normalization, the outcome taxonomy, batch limits and isolation, and **parity
 with the raw evaluator** over the canonical Acme domain — the SDK adds no
 semantics of its own. Python/Go SDKs remain later.
 
-## Phase 6 — Persistence 🔜 Planned
+## Phase 6 — Persistence ✅ Implemented
 
-Persistent relationship + policy stores. Database choice **after** access
-patterns are benchmarked and documented (Postgres is the likely first
-candidate; no custom graph DB until proven necessary).
+PostgreSQL relationship and policy stores (`@uae/persistence`), chosen from
+**measured** access patterns rather than assumption, as the roadmap required.
+
+- **ADR-0017** records the benchmark methodology and the numbers. The decisive
+  finding: the evaluator issues a **fixed ~3.7 store queries per check**, and
+  that count is **invariant across a 9x growth in relationships** (176 →
+  1,632). Result sets are tiny (max 1 row). The workload is index-covered point
+  lookups, so the current bottleneck is the in-memory store's linear scan — an
+  indexing problem, not a graph problem. No evidence of the super-linear
+  traversal that would justify a specialized store. The ADR also records
+  **reversal triggers**, so the decision is falsifiable rather than dogmatic.
+- **ADR-0018** makes the store semantics **executable**: the normative contract
+  (S1–S10) lives in `tests/store-conformance.ts` and runs against **every**
+  backend, the in-memory reference included. A new backend is not done until it
+  passes unmodified. The subtle requirements are called out explicitly —
+  unbound-means-all, snapshot consistency, deterministic ordering, typed
+  failures that are never signalled as an empty result, and publish-never-
+  activates.
+- **ADR-0019** closes the Phase 4 deferral: `CheckOptions.policyVersion` pins an
+  exact artifact. Pinning is opt-in (default unchanged), an unknown version
+  raises `PolicyNotFoundError` rather than falling back — silently evaluating a
+  different policy would produce a decision attributed to a policy that did not
+  produce it — and it surfaces as a _caller_ error, not `AUTHZ_UNAVAILABLE`.
+- `pg` is confined to `@uae/persistence`; the core keeps zero runtime
+  dependencies (ADR-0005). The stores depend on a narrow `PgQueryable`
+  interface, not on `pg` directly, so SQL construction, error classification, and
+  fail-closed behaviour are unit-tested with **no database present**.
+- **Docker is never required.** With `AUTHZ_TEST_PG_URL` unset, the Postgres
+  suites skip with an explicit message; `pnpm test` stays green on a fresh clone.
+
+Schema, indexes, and the idempotency guarantee are documented in
+`../architecture/storage.md`. Access-pattern measurement: `pnpm bench`.
 
 ## Phase 7 — Performance 🔜 Planned
 

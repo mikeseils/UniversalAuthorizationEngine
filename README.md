@@ -73,7 +73,8 @@ if (!result.decision.allowed) {
 | Policy language v1, parser, AST, compiler (`@uae/policy`)     | **Implemented** (v1 subset)    |
 | CLI (`authz validate/test/check/init`)                        | **Implemented** (Phase 4)      |
 | SDK (`@uae/sdk`: `check`, `checkBatch`, decision/unavailable) | **Implemented** (Phase 5)      |
-| Persistence, caching, benchmarks                              | Planned (Phases 6–7)           |
+| PostgreSQL stores (`@uae/persistence`) + store contract       | **Implemented** (Phase 6)      |
+| Caching, decision-cache invalidation                          | Planned (Phase 7)              |
 | Hosted / self-hosted service                                  | Planned (Phase 8+)             |
 
 No feature is claimed as implemented above unless it exists in this
@@ -163,9 +164,11 @@ More: `docs/development/local-development.md`.
 │   ├── policy/            Policy language (lexer/parser/AST/lowering), validation, versioned store
 │   ├── evaluator/         Deterministic evaluator + explanations
 │   ├── sdk/               TypeScript SDK: stable client API, decision/unavailable outcomes
-│   └── cli/               authz CLI: init, validate, test, check
+│   ├── cli/               authz CLI: init, validate, test, check
+│   └── persistence/       PostgreSQL relationship + policy stores, SQL migrations
 ├── examples/acme/         Canonical example domain (policy, relationships, tests)
-└── tests/                 Engine, CLI, SDK, and security suites
+├── scripts/bench.mjs      Access-pattern benchmark (pnpm bench)
+└── tests/                 Engine, CLI, SDK, persistence, conformance, and security suites
 ```
 
 ## Security considerations
