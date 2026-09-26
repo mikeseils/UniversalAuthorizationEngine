@@ -54,3 +54,22 @@ export function assertIdentifier(value: unknown, field: string): Identifier {
   }
   return Object.freeze({ type, id });
 }
+
+/**
+ * Accept either form of a reference — the `type:id` string or the structured
+ * `{ type, id }` — and return the parsed form. `field` names the offending part
+ * in the error so callers can report *which* input was malformed.
+ *
+ * Used at request boundaries (both forms are legitimately held by callers);
+ * strict `parseIdentifier` stays the default everywhere else.
+ */
+export function coerceIdentifier(value: unknown, field: string): Identifier {
+  try {
+    return typeof value === "string" ? parseIdentifier(value) : assertIdentifier(value, field);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw new ValidationError(field, error.message);
+    }
+    throw error;
+  }
+}

@@ -5,9 +5,8 @@ import {
   Identifier,
   PolicyStore,
   VersionedPolicy,
+  coerceIdentifier,
   parseAction,
-  parseResource,
-  parseSubject,
 } from "@uae/core";
 import { isCompiledArtifactShape, PolicyDefinition, PolicyExpression } from "@uae/policy";
 import { finalize } from "./finalize.js";
@@ -38,17 +37,18 @@ export class Evaluator {
   }
 
   /**
-   * Evaluate one request. Malformed requests throw at the boundary
-   * (`ValidationError`); infrastructure failures propagate typed errors;
-   * every evaluated outcome is fail-closed (ADR-0010).
+   * Evaluate one request. Subjects/resources may be given as `type:id` strings
+   * or parsed identifiers. Malformed requests throw at the boundary
+   * (`ValidationError`); infrastructure failures propagate typed errors; every
+   * evaluated outcome is fail-closed (ADR-0010).
    */
   async check(
     request: AuthorizationRequest,
     options?: CheckOptions,
   ): Promise<AuthorizationDecision> {
-    const subject = parseSubject(request.subject);
+    const subject = coerceIdentifier(request.subject, "subject");
     const action = parseAction(request.action);
-    const resource = parseResource(request.resource);
+    const resource = coerceIdentifier(request.resource, "resource");
     const context: AuthorizationContext = request.context ?? {};
     this.emit("normalize", `${action} on ${resource.type}:${resource.id}`);
 

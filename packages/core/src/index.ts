@@ -17,6 +17,7 @@ export {
 export type { Resource, Subject } from "./principals.js";
 export {
   assertIdentifier,
+  coerceIdentifier,
   formatResource,
   formatSubject,
   isSubject,
