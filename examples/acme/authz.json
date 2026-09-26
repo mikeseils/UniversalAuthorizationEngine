@@ -1,0 +1,6 @@
+{
+  "formatVersion": 1,
+  "policy": "policy.authz",
+  "relationships": "relationships.jsonl",
+  "tests": ["tests"]
+}

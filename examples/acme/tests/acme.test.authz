@@ -1,0 +1,59 @@
+// Canonical Acme policy tests (ADR-0014).
+//
+// These mirror the assertions in tests/evaluator-acme.test.ts and
+// tests/security-tenant-isolation.test.ts, so the example project on disk and
+// the engine's own suite cannot drift apart. Run them with:
+//
+//   authz test
+//
+// from this directory (authz.json supplies the paths).
+
+test "alice administers the organization" {
+  check(user:alice, organization.read, organization:acme) == allow
+  check(user:alice, organization.manage, organization:acme) == allow
+}
+
+test "bob is only a member of the organization" {
+  check(user:bob, organization.read, organization:acme) == allow
+  check(user:bob, organization.manage, organization:acme) == deny
+}
+
+test "project roles are ordered owner > editor > viewer" {
+  check(user:alice, project.read, project:alpha) == allow
+  check(user:alice, project.write, project:alpha) == allow
+  check(user:alice, project.delete, project:alpha) == allow
+
+  check(user:bob, project.read, project:alpha) == allow
+  check(user:bob, project.write, project:alpha) == deny
+  check(user:bob, project.delete, project:alpha) == deny
+}
+
+test "document permissions are inherited from the containing project" {
+  check(user:alice, document.read, document:a) == allow
+  check(user:alice, document.delete, document:a) == allow
+
+  check(user:bob, document.read, document:a) == allow
+  check(user:bob, document.delete, document:a) == deny
+}
+
+test "an unrelated subject is denied on every layer" {
+  check(user:carol, organization.read, organization:acme) == deny
+  check(user:carol, project.read, project:alpha) == deny
+  check(user:carol, document.read, document:a) == deny
+}
+
+test "a resource with no policy relation of its own is denied" {
+  // document:b is contained by project:alpha just like document:a, but carol
+  // has no path to it; unrelated resources are denied, never defaulted.
+  check(user:carol, document.delete, document:b) == deny
+}
+
+test "granting ownership in a `given` block flips deny to allow" {
+  given {
+    user:carol owner project:alpha
+  }
+  check(user:carol, project.write, project:alpha) == allow
+  check(user:carol, project.read, project:alpha) == allow
+  // Owning the project still does not confer organization administration.
+  check(user:carol, organization.manage, organization:acme) == deny
+}

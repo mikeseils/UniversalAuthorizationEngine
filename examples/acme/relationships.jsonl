@@ -1,0 +1,10 @@
+// Canonical Acme example data (docs/design/domain-model.md), mirroring
+// examples/acme/fixture.ts. One JSON object per line (ADR-0013).
+{"formatVersion":1}
+{"subject":"user:alice","relation":"admin","resource":"organization:acme"}
+{"subject":"user:bob","relation":"member","resource":"organization:acme"}
+{"subject":"organization:acme","relation":"owns","resource":"project:alpha"}
+{"subject":"user:alice","relation":"owner","resource":"project:alpha"}
+{"subject":"user:bob","relation":"viewer","resource":"project:alpha"}
+{"subject":"project:alpha","relation":"contains","resource":"document:a"}
+{"subject":"project:alpha","relation":"contains","resource":"document:b"}
