@@ -1,5 +1,5 @@
 import { readdirSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { join } from "node:path";
 import { ParsedCommand, flagValue, hasFlag } from "./args.js";
 import { CliConfig, findConfigFile, loadConfig, resolveFlagPath } from "./config.js";
 import { UsageError } from "./errors.js";
@@ -93,7 +93,7 @@ function collectTestFiles(dir: string, into: Set<string>): void {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       collectTestFiles(full, into);
-    } else if (entry.isFile() && extname(entry.name) === TEST_FILE_SUFFIX) {
+    } else if (entry.isFile() && entry.name.endsWith(TEST_FILE_SUFFIX)) {
       into.add(full);
     }
   }
