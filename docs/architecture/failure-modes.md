@@ -18,14 +18,14 @@ Status: **Binding design.** Fail-closed is invariant from day one (ADR-0006).
 | Evaluator internal error                         | DENY (or typed infrastructure error), with an error explanation node; never ALLOW                                  |
 | Policy store unavailable                         | Typed infrastructure failure — distinct from DENY (see below)                                                      |
 | Relationship store unavailable                   | Typed infrastructure failure — distinct from DENY                                                                  |
-| Batch larger than `maxBatchSize`                 | Rejected at the boundary (typed `ValidationError`) before any evaluation                                            |
-| Infrastructure failure during a batch            | The whole batch rejects — per-item outcomes are never fabricated (the SDK represents unavailability per item)        |
+| Batch larger than `maxBatchSize`                 | Rejected at the boundary (typed `ValidationError`) before any evaluation                                           |
+| Infrastructure failure during a batch            | The whole batch rejects — per-item outcomes are never fabricated (the SDK represents unavailability per item)      |
 
 ## DENIED vs AUTHZ_UNAVAILABLE
 
 A denial and an infrastructure failure are **fundamentally different
 outcomes**, and SDKs/APIs must not conflate them. They are separated
-*structurally* — never by convention — so that no caller can accidentally treat
+_structurally_ — never by convention — so that no caller can accidentally treat
 "could not answer" as an answer:
 
 ```ts

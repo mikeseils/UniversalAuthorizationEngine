@@ -61,7 +61,7 @@ if (!decision.allowed) {
 | Structured policy + versioned store (`@uae/policy`)       | **Implemented** (draft shapes) |
 | In-memory evaluator + explanations (`@uae/evaluator`)     | **Implemented** (draft shapes) |
 | Policy language v1, parser, AST, compiler (`@uae/policy`) | **Implemented** (v1 subset)    |
-| CLI (`authz validate/test/check`)                         | Planned (Phase 4)              |
+| CLI (`authz validate/test/check/init`)                    | **Implemented** (Phase 4)      |
 | SDK                                                       | Planned (Phase 5)              |
 | Persistence, caching, benchmarks                          | Planned (Phases 6–7)           |
 | Hosted / self-hosted service                              | Planned (Phase 8+)             |
@@ -131,10 +131,10 @@ More: `docs/development/local-development.md`.
 │   ├── core/              Domain types + store interfaces (zero dependencies)
 │   ├── policy/            Policy language (lexer/parser/AST/lowering), validation, versioned store
 │   ├── evaluator/         Deterministic evaluator + explanations
-│   ├── sdk/               Planned — client API
-│   └── cli/               Planned — authz CLI
-├── examples/acme/         Canonical example domain (fixtures + policy.authz)
-└── tests/                 Unit/integration/security tests
+│   ├── sdk/               Planned — stable client API (ADR-0016)
+│   └── cli/               authz CLI: init, validate, test, check
+├── examples/acme/         Canonical example domain (policy, relationships, tests)
+└── tests/                 Engine, CLI, and security suites
 ```
 
 ## Security considerations

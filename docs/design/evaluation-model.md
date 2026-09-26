@@ -68,15 +68,17 @@ infrastructure error — never an ALLOW.
 
 ```ts
 interface AuthorizationRequest {
-  subject: Subject;
+  /** `SubjectRef`: either `Subject` or the `"user:alice"` string form (ADR-0015). */
+  subject: SubjectRef;
   action: Action;
-  resource: Resource;
+  resource: ResourceRef;
   context?: AuthorizationContext;
 }
 
 interface AuthorizationDecision {
   allowed: boolean;
-  explanation?: AuthorizationExplanation;
+  reason?: DecisionReason; // policy_allow | policy_deny | policy_deny_rule | error
+  explanation?: ExplanationNode;
   policyVersion?: string;
 }
 

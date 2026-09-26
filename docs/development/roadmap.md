@@ -46,10 +46,13 @@ text Acme policy produces identical decisions to the programmatic one across
 every case) — 145 tests total. Static analysis (`authz analyze`) and the
 language-maturity items of Phase 13 remain **Planned**.
 
-## Phase 4 — CLI 🔜 Planned
+## Phase 4 — CLI ✅ Implemented
 
-`authz init`, `authz validate`, `authz test`, `authz check` — only commands
-backed by real functionality.
+Policy language and evaluator are accessible locally via the `authz` CLI:
+`authz validate` (syntax + schema verification), `authz test` (declarative
+assertion runner), `authz check` (one-off evaluation), and `authz init` (starter
+scaffold). Implemented in `packages/cli` (ADR-0013, ADR-0014). Supported
+commands are backed by real functionality; `analyze` and `bench` remain planned.
 
 ## Phase 5 — SDK 🔜 Planned
 
