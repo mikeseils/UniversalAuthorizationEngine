@@ -24,7 +24,7 @@ export type { CheckOptions, EvaluatorDependencies } from "./types.js";
 export class Evaluator {
   private readonly policyStore: PolicyStore;
   private readonly relationshipStore: import("@uae/core").RelationshipStore;
-  private readonly limits: EvaluationLimits;
+  public readonly limits: EvaluationLimits;
   private observer?: EvaluationObserver;
   private readonly evaluate = makeEvaluatorFn();
 
