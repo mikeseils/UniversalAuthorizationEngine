@@ -132,4 +132,7 @@ export const check = (
   action: string,
   resource: string,
   context?: AuthorizationRequest["context"],
-) => evaluator.check({ subject, action, resource, context });
+) =>
+  evaluator.check(
+    context !== undefined ? { subject, action, resource, context } : { subject, action, resource },
+  );

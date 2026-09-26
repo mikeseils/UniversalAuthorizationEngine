@@ -1,5 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
 import {
+  PolicyDefinition,
   StructuredPolicy,
   allOf,
   anyOf,
@@ -103,7 +104,7 @@ describe("three-valued connective semantics (ADR-0010)", () => {
 
 describe("bounded evaluation", () => {
   function chainPolicy(depth: number): StructuredPolicy {
-    const definitions: StructuredPolicy["definitions"] = {};
+    const definitions: Record<string, PolicyDefinition> = {};
     for (let i = 0; i < depth; i++) {
       definitions[`level${String(i)}`] = {
         relations: {},

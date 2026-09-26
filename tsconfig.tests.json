@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "baseUrl": ".",
+    "paths": {
+      "@uae/core": ["packages/core/src/index.ts"],
+      "@uae/policy": ["packages/policy/src/index.ts"],
+      "@uae/evaluator": ["packages/evaluator/src/index.ts"],
+      "@uae/cli": ["packages/cli/src/index.ts"]
+    }
+  },
+  "include": ["tests/**/*.ts", "examples/**/*.ts", "vitest.config.ts"]
+}
