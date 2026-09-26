@@ -4,6 +4,7 @@ import {
   AuthorizationRequest,
   Identifier,
   PolicyStore,
+  ValidationError,
   VersionedPolicy,
   coerceIdentifier,
   parseAction,
@@ -60,15 +61,24 @@ export class Evaluator {
   }
 
   /**
-   * Sequential batch in Phase 2; each item independently fail-closed.
-   * Malformed batch input throws at the boundary before any evaluation.
+   * Sequential batch (Phase 2/7) — concurrency is a performance-phase concern.
+   *
+   * Failure semantics, stated precisely because they are security-relevant:
+   * *evaluation outcomes* are per-item and each is independently fail-closed, but
+   * an **infrastructure failure** (or a malformed request) rejects the whole
+   * batch. Returning a decision list that silently substituted DENY for "the
+   * engine could not answer" would destroy the DENIED-vs-AUTHZ_UNAVAILABLE
+   * distinction that the failure-modes design requires, and fabricating an ALLOW
+   * is never acceptable. Per-item unavailability therefore needs a result type
+   * that `core` deliberately does not have — it belongs to the SDK (ADR-0016).
    */
   async checkBatch(
     requests: readonly AuthorizationRequest[],
     options?: CheckOptions,
   ): Promise<AuthorizationDecision[]> {
     if (requests.length > this.limits.maxBatchSize) {
-      throw new Error(
+      throw new ValidationError(
+        "requests",
         `batch of ${String(requests.length)} exceeds maxBatchSize ${String(this.limits.maxBatchSize)}`,
       );
     }
