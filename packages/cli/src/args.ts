@@ -96,7 +96,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     name: "check",
     summary: "Evaluate one authorization request",
     usage:
-      "authz check <subject> <action> <resource> [--context json] [--explain level] [--policy file] [--relationships file] [--json] [--no-fail-on-deny]",
+      "authz check <subject> <action> <resource> [--context json] [--explain level] [--policy file] [--relationships file] [--policy-version v] [--json] [--no-fail-on-deny]",
     flags: [
       { name: "--context", kind: "string", value: "json", description: "request context JSON" },
       {
@@ -107,6 +107,12 @@ export const COMMANDS: readonly CommandSpec[] = [
       },
       POLICY_FLAG,
       RELATIONSHIPS_FLAG,
+      {
+        name: "--policy-version",
+        kind: "string",
+        value: "version",
+        description: "evaluate an exact policy version (ADR-0019)",
+      },
       { name: "--json", kind: "boolean", description: "machine-readable output" },
       {
         name: "--no-fail-on-deny",

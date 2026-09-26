@@ -28,6 +28,11 @@ export interface ClientRequest {
  */
 export interface ClientCheckOptions {
   readonly explanation?: ExplanationLevel;
+  /**
+   * Evaluate against this exact policy version instead of the active one
+   * (ADR-0019). Omitted by default, which keeps the active-version behaviour.
+   */
+  readonly policyVersion?: string;
 }
 
 /**

@@ -6,7 +6,7 @@
  * and only after design reasoning is recorded in an ADR
  * (docs/architecture/api-boundaries.md).
  */
-export { ValidationError } from "./errors.js";
+export { PolicyNotFoundError, ValidationError } from "./errors.js";
 export type { Identifier } from "./identifiers.js";
 export {
   formatIdentifier,

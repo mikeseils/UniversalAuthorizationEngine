@@ -1,4 +1,4 @@
-import { AuthorizationRequest } from "@uae/core";
+import { AuthorizationRequest, PolicyNotFoundError } from "@uae/core";
 import { Evaluator } from "@uae/evaluator";
 import { PolicyStoreError } from "@uae/policy";
 import { AuthorizationUnavailableError, UnavailableReason } from "./errors.js";
@@ -30,10 +30,24 @@ export class InProcessTransport implements ClientTransport {
     try {
       const decision = await this.evaluator.check(
         request,
-        options?.explanation !== undefined ? { explanation: options.explanation } : undefined,
+        options === undefined
+          ? undefined
+          : {
+              ...(options.explanation !== undefined ? { explanation: options.explanation } : {}),
+              ...(options.policyVersion !== undefined
+                ? { policyVersion: options.policyVersion }
+                : {}),
+            },
       );
       return { outcome: "decision", decision };
     } catch (error) {
+      // A pinned version that does not exist is a *caller* error, not an
+      // infrastructure failure (ADR-0019). Reporting it as `unavailable` would
+      // tell the application the engine is broken when it asked for something
+      // that never existed — and would let a fail-closed path mask a bug.
+      if (error instanceof PolicyNotFoundError) {
+        throw error;
+      }
       return { outcome: "unavailable", error: toUnavailableError(error) };
     }
   }

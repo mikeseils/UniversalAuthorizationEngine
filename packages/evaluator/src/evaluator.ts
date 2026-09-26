@@ -3,6 +3,7 @@ import {
   AuthorizationDecision,
   AuthorizationRequest,
   Identifier,
+  PolicyNotFoundError,
   PolicyStore,
   ValidationError,
   VersionedPolicy,
@@ -53,7 +54,7 @@ export class Evaluator {
     const context: AuthorizationContext = request.context ?? {};
     this.emit("normalize", `${action} on ${resource.type}:${resource.id}`);
 
-    const policy = await this.policyStore.getActivePolicy();
+    const policy = await this.loadPolicy(options?.policyVersion);
     this.emit("policy:loaded", policy.version);
 
     const result = await this.evaluateArtifact(policy, subject, action, resource, context);
@@ -87,6 +88,25 @@ export class Evaluator {
       decisions.push(await this.check(request, options));
     }
     return decisions;
+  }
+
+  /**
+   * Resolve the policy artifact to evaluate (ADR-0019).
+   *
+   * Pinning is opt-in and the default path is unchanged. An unknown pinned
+   * version throws rather than falling back to the active version: silently
+   * evaluating a different policy would make an audit trail — the whole point
+   * of pinning — actively misleading.
+   */
+  private async loadPolicy(version: string | undefined): Promise<VersionedPolicy> {
+    if (version === undefined) {
+      return this.policyStore.getActivePolicy();
+    }
+    const pinned = await this.policyStore.getPolicyVersion(version);
+    if (pinned === null) {
+      throw new PolicyNotFoundError(version);
+    }
+    return pinned;
   }
 
   private emit(stage: string, detail?: string): void {

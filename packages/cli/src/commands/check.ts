@@ -27,6 +27,8 @@ export async function runCheck(command: ParsedCommand, io: CliIo): Promise<ExitC
   const resource = command.positionals[2] as string;
   const context = parseContext(flagValue(command, "--context"));
   const level = parseLevel(flagValue(command, "--explain"), hasFlag(command, "--json"));
+  // Pinning is opt-in (ADR-0019); omitted means "use the active version".
+  const pinned = flagValue(command, "--policy-version");
 
   const session = await loadSession({ policyFile, relationshipsFile });
   for (const warning of session.warnings) {
@@ -39,7 +41,10 @@ export async function runCheck(command: ParsedCommand, io: CliIo): Promise<ExitC
       resource,
       ...(context === undefined ? {} : { context }),
     },
-    { explanation: level },
+    {
+      explanation: level,
+      ...(pinned === undefined ? {} : { policyVersion: pinned }),
+    },
   );
 
   if (hasFlag(command, "--json")) {

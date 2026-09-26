@@ -1,4 +1,4 @@
-export { ValidationError } from "@uae/core";
+export { PolicyNotFoundError, ValidationError } from "@uae/core";
 
 /**
  * Reason classifications for why the engine was unavailable.
