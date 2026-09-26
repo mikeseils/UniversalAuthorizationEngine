@@ -30,6 +30,18 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@18.19.130)
 
+  packages/cli:
+    dependencies:
+      '@uae/core':
+        specifier: workspace:*
+        version: link:../core
+      '@uae/evaluator':
+        specifier: workspace:*
+        version: link:../evaluator
+      '@uae/policy':
+        specifier: workspace:*
+        version: link:../policy
+
   packages/core: {}
 
   packages/evaluator:
