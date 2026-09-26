@@ -9,3 +9,9 @@ export { DEFAULT_LIMITS } from "./limits.js";
 export type { EvaluationLimits, EvaluationObserver } from "./limits.js";
 export type { CheckOptions, EvaluatorDependencies } from "./types.js";
 export { permissionName } from "./permission-name.js";
+export { InstrumentedRelationshipStore, percentiles, queryShape } from "./store-metrics.js";
+export type {
+  MonotonicClock,
+  RelationshipQueryShape,
+  RelationshipStoreReport,
+} from "./store-metrics.js";
