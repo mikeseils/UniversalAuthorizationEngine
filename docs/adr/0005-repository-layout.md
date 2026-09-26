@@ -17,7 +17,7 @@ Use a pnpm workspace with these packages:
 | `packages/core`      | Domain model: identifiers, subjects/resources/actions, requests, decisions, explanations, store interfaces | **Implemented (initial)** |
 | `packages/policy`    | Policy representation, parsing, validation, versioning                                                     | Planned (Phase 3)         |
 | `packages/evaluator` | Deterministic decision engine: policy + relationships + context → decision + explanation                   | Planned (Phase 2+)        |
-| `packages/sdk`       | Developer-facing client API (`check()`, `checkBatch()`)                                                    | Planned (Phase 5)         |
+| `packages/sdk`       | Developer-facing client API (`check()`, `checkBatch()`)                                                    | Implemented (Phase 5)     |
 | `packages/cli`       | `authz` CLI (`init`, `validate`, `test`, `check`)                                                          | Planned (Phase 4)         |
 
 ## Boundary rationale

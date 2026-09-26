@@ -54,10 +54,39 @@ assertion runner), `authz check` (one-off evaluation), and `authz init` (starter
 scaffold). Implemented in `packages/cli` (ADR-0013, ADR-0014). Supported
 commands are backed by real functionality; `analyze` and `bench` remain planned.
 
-## Phase 5 — SDK 🔜 Planned
+## Phase 5 — TypeScript SDK ✅ Implemented
 
-TypeScript SDK (`check`, `checkBatch`); distinct DENIED vs
-AUTHZ_UNAVAILABLE error semantics; Python/Go SDKs later.
+`@uae/sdk` is the stable client surface for application developers (ADR-0015,
+ADR-0016). `AuthzClient.check()` returns a **discrete, typed outcome** rather than
+a bare boolean or an exception:
+
+```ts
+type CheckOutcome =
+  | { outcome: "decision"; decision: AuthorizationDecision }
+  | { outcome: "unavailable"; error: AuthorizationUnavailableError };
+```
+
+A denial (`allowed: false`) is a decision; an infrastructure failure is
+`unavailable` — never collapsed into either a `false` or a thrown `Error`
+(ADR-0006, `docs/architecture/failure-modes.md`). Clients:
+
+- accept ergonomic requests (`subject: "user:alice"` or
+  `{ type: "user", id: "alice" }`) and fail fast with `ValidationError` at the
+  boundary, before any dispatch;
+- offer `isAllowed()` for guard sites — throwing on `unavailable` by default, with
+  an explicit opt-in `onUnavailable: "deny"` for fail-closed paths, and **no API
+  path that can fail open**;
+- offer `checkBatch()` with 1:1 positional results and per-item isolation: one
+  item's infrastructure failure never fabricates decisions nor discards its
+  siblings' valid decisions;
+- are transport-agnostic (`ClientTransport`), with an in-process transport
+  today and a network transport reserved for the Phase 8 data plane.
+
+Client construction is `AuthzClient.fromEvaluator(evaluator)` or the ergonomic
+`AuthzClient.inMemory({ policy, relationships })`. Test suites cover request
+normalization, the outcome taxonomy, batch limits and isolation, and **parity
+with the raw evaluator** over the canonical Acme domain — the SDK adds no
+semantics of its own. Python/Go SDKs remain later.
 
 ## Phase 6 — Persistence 🔜 Planned
 

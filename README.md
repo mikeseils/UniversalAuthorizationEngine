@@ -37,34 +37,44 @@ The fundamental representation is a relationship-oriented graph (ReBAC),
 within which roles (RBAC) and attributes (ABAC) are expressible.
 Governing invariant: **unknown → deny** (`docs/adr/0006-default-deny.md`).
 
-## Minimal example (target API — not yet implemented)
+## Minimal example
 
 ```ts
-const decision = await authz.check({
+import { AuthzClient } from "@uae/sdk";
+
+const authz = await AuthzClient.inMemory({
+  policy: policyText,
+  relationships: [{ subject: "user:alice", relation: "owner", resource: "project:alpha" }],
+});
+
+const result = await authz.check({
   subject: "user:alice",
   action: "document.delete",
   resource: "document:123",
 });
 
-if (!decision.allowed) {
+if (result.outcome === "unavailable") {
+  // The engine could not answer. This is NOT a denial — decide explicitly.
+  throw result.error;
+}
+if (!result.decision.allowed) {
   throw new ForbiddenError();
 }
-// Eventually: { allowed: true, policyVersion: "42", explanation: { … } }
 ```
 
 ## Implementation status
 
-| Area                                                      | Status                         |
-| --------------------------------------------------------- | ------------------------------ |
-| Repository, tooling, CI, documentation                    | **Implemented**                |
-| Domain model & core types (`@uae/core`)                   | **Implemented** (draft shapes) |
-| Structured policy + versioned store (`@uae/policy`)       | **Implemented** (draft shapes) |
-| In-memory evaluator + explanations (`@uae/evaluator`)     | **Implemented** (draft shapes) |
-| Policy language v1, parser, AST, compiler (`@uae/policy`) | **Implemented** (v1 subset)    |
-| CLI (`authz validate/test/check/init`)                    | **Implemented** (Phase 4)      |
-| SDK                                                       | Planned (Phase 5)              |
-| Persistence, caching, benchmarks                          | Planned (Phases 6–7)           |
-| Hosted / self-hosted service                              | Planned (Phase 8+)             |
+| Area                                                          | Status                         |
+| ------------------------------------------------------------- | ------------------------------ |
+| Repository, tooling, CI, documentation                        | **Implemented**                |
+| Domain model & core types (`@uae/core`)                       | **Implemented** (draft shapes) |
+| Structured policy + versioned store (`@uae/policy`)           | **Implemented** (draft shapes) |
+| In-memory evaluator + explanations (`@uae/evaluator`)         | **Implemented** (draft shapes) |
+| Policy language v1, parser, AST, compiler (`@uae/policy`)     | **Implemented** (v1 subset)    |
+| CLI (`authz validate/test/check/init`)                        | **Implemented** (Phase 4)      |
+| SDK (`@uae/sdk`: `check`, `checkBatch`, decision/unavailable) | **Implemented** (Phase 5)      |
+| Persistence, caching, benchmarks                              | Planned (Phases 6–7)           |
+| Hosted / self-hosted service                                  | Planned (Phase 8+)             |
 
 No feature is claimed as implemented above unless it exists in this
 repository. Full detail: `docs/development/roadmap.md`.
@@ -103,6 +113,27 @@ An explanation can be requested per check
 (`evaluator.check(req, { explanation: "standard" })`), and `checkBatch` evaluates
 many requests with per-item fail-closed results.
 
+## SDK (`@uae/sdk`)
+
+Applications should not wire up stores and the evaluator themselves. The SDK is
+the supported client surface:
+
+```ts
+// A denial and an engine outage are different things, and stay different things.
+const allowed = await authz.isAllowed({ subject, action, resource });
+// ^ throws AuthorizationUnavailableError on infrastructure failure.
+// ^ pass { onUnavailable: "deny" } to fail closed to `false` instead.
+// ^ there is no option that fails open.
+
+const outcomes = await authz.checkBatch([req1, req2, req3]);
+// 1:1 with the input; one unavailable item never invalidates its siblings.
+```
+
+Wrap an existing `Evaluator` with `AuthzClient.fromEvaluator(evaluator)`, or
+construct a ready-to-use client with `AuthzClient.inMemory({ policy, relationships })`.
+Transports are pluggable (`ClientTransport`), so the same client code works
+in-process today and against a remote data plane later. Design: ADR-0015, ADR-0016.
+
 ## Development setup
 
 Requires Node.js ≥ 18.14 and pnpm (Docker not required). In PowerShell:
@@ -131,10 +162,10 @@ More: `docs/development/local-development.md`.
 │   ├── core/              Domain types + store interfaces (zero dependencies)
 │   ├── policy/            Policy language (lexer/parser/AST/lowering), validation, versioned store
 │   ├── evaluator/         Deterministic evaluator + explanations
-│   ├── sdk/               Planned — stable client API (ADR-0016)
+│   ├── sdk/               TypeScript SDK: stable client API, decision/unavailable outcomes
 │   └── cli/               authz CLI: init, validate, test, check
 ├── examples/acme/         Canonical example domain (policy, relationships, tests)
-└── tests/                 Engine, CLI, and security suites
+└── tests/                 Engine, CLI, SDK, and security suites
 ```
 
 ## Security considerations

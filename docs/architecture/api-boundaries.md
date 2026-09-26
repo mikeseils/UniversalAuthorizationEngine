@@ -1,7 +1,8 @@
 # API Boundary Strategy
 
-Status: design (public APIs stabilize with the SDK phase; all exported types
-carry a draft marker until then).
+Status: design. The SDK's public surface is now recorded in **ADR-0015** and
+**ADR-0016** and is treated as the stability reference for client code; every
+other exported type still carries a draft marker until it is promoted here.
 
 ## Layering rule
 
@@ -17,10 +18,10 @@ contains domain types and interfaces only.
 
 ## Stability levels
 
-| Level  | Meaning                                                                         | Current                  |
-| ------ | ------------------------------------------------------------------------------- | ------------------------ |
-| Draft  | Shape may change without notice; documented reasoning required before promotion | All exported types today |
-| Stable | Semantic versioning applies; breaking changes require an ADR                    | none yet                 |
+| Level  | Meaning                                                                         | Current                   |
+| ------ | ------------------------------------------------------------------------------- | ------------------------- |
+| Draft  | Shape may change without notice; documented reasoning required before promotion | Most exported types       |
+| Stable | Semantic versioning applies; breaking changes require an ADR                    | `@uae/sdk` client surface |
 
 Rules:
 
@@ -32,7 +33,31 @@ Rules:
   from code APIs and may not borrow "draft" freedom — persisted artifacts
   need explicit format versions from day one.
 
-## Public API surface (target)
+## Public API surface
+
+The client surface implemented in `packages/sdk` (ADR-0015, ADR-0016):
+
+```ts
+normalizeClientRequest(req: ClientRequest): AuthorizationRequest
+
+class AuthzClient {
+  static fromEvaluator(evaluator: Evaluator): AuthzClient;
+  static inMemory(options: InMemoryClientOptions): Promise<AuthzClient>;
+
+  check(req: ClientRequest, options?: ClientCheckOptions): Promise<CheckOutcome>;
+  isAllowed(req: ClientRequest, options?: IsAllowedOptions): Promise<boolean>;
+  checkBatch(
+    reqs: readonly ClientRequest[],
+    options?: ClientCheckOptions,
+  ): Promise<readonly CheckOutcome[]>;
+}
+
+type CheckOutcome =
+  | { outcome: "decision"; decision: AuthorizationDecision }
+  | { outcome: "unavailable"; error: AuthorizationUnavailableError };
+```
+
+The underlying engine surface remains:
 
 ```ts
 check(request: AuthorizationRequest): Promise<AuthorizationDecision>
