@@ -20,6 +20,7 @@ export default defineConfig({
       "@uae/policy": source("policy"),
       "@uae/evaluator": source("evaluator"),
       "@uae/cli": source("cli"),
+      "@uae/sdk": source("sdk"),
     },
   },
   test: {
