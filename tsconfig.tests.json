@@ -12,7 +12,8 @@
       "@uae/policy": ["packages/policy/src/index.ts"],
       "@uae/evaluator": ["packages/evaluator/src/index.ts"],
       "@uae/cli": ["packages/cli/src/index.ts"],
-      "@uae/sdk": ["packages/sdk/src/index.ts"]
+      "@uae/sdk": ["packages/sdk/src/index.ts"],
+      "@uae/persistence": ["packages/persistence/src/index.ts"]
     }
   },
   "include": ["tests/**/*.ts", "examples/**/*.ts", "vitest.config.ts"]

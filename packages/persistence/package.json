@@ -1,0 +1,31 @@
+{
+  "name": "@uae/persistence",
+  "version": "0.1.0",
+  "description": "PostgreSQL relationship and policy stores for the Universal Authorization Engine",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "sql"
+  ],
+  "scripts": {
+    "build": "pnpm --filter @uae/policy run build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @uae/policy run build && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@uae/core": "workspace:*",
+    "@uae/policy": "workspace:*",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}

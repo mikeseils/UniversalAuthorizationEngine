@@ -21,6 +21,7 @@ export default defineConfig({
       "@uae/evaluator": source("evaluator"),
       "@uae/cli": source("cli"),
       "@uae/sdk": source("sdk"),
+      "@uae/persistence": source("persistence"),
     },
   },
   test: {
