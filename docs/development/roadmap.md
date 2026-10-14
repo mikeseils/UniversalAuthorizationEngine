@@ -170,7 +170,7 @@ PostgreSQL relationship and policy stores (`@uae/persistence`), chosen from
 Schema, indexes, error taxonomy, and the idempotency guarantee are documented in
 `../architecture/storage.md`. Access-pattern measurement: `pnpm bench`.
 
-## Phase 7 — Performance 🟡 In progress
+## Phase 7 — Performance 🟢 Complete
 
 - **Invalidation requirements first**, per `../architecture/caching.md`:
   **ADR-0018 S11** adds the opaque, side-effect-free relationship-state version
@@ -194,9 +194,7 @@ Schema, indexes, error taxonomy, and the idempotency guarantee are documented in
   poisoning resistance, and fail-closed recovery with **all three caches
   configured together**; `pnpm bench` also reports the distinct-stream
   relationship-cache arm.
-- Remaining in this phase: profiling beyond the observer `elapsedMs` seed and
-  the extended benchmark matrix (large policies, batch checks); dependency
-  tracking and explicit consistency modes remain open (Phase 10+).
+- The phase closes with **stage profiling**, the **extended benchmark matrix**, and **generative property tests**. Every workload's uncached arm aggregates observer `elapsedMs` per stage and prints a stage profile (decision time dominates at 93-99%, policy load ~1%, normalize rounds to zero) with no engine changes. The batch arm reports `checkBatch` chunked at `maxBatchSize` against N x `check` on the same stream: version reads drop from **one per item to one per chunk** (1.00 -> 0.01/check) with `decisionsMatch=true`. The `large-policy` workload adds a `folder` level (org -> project -> folder -> document, wider clauses, mixed shallow/deep allows): **4.17** queries/check uncached, collapsed to 0.32 by the relationship cache at 94% hit rate. `tests/evaluator-property.test.ts` (fast-check) covers removal monotonicity, disjoint-namespace inertness, reference-closure parity, and cached-vs-fresh agreement across generated op sequences. Dependency tracking and explicit consistency modes remain open (Phase 10+).
 
 ## Phase 8 — Production architecture 🔜 Planned
 

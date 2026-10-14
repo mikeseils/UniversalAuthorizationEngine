@@ -101,8 +101,21 @@ generated policies would test the generator, not the engine:
 
 ### 8. Performance tests (Phase 7)
 
-Benchmarks for simple RBAC, deep traversal, large graphs/policies, batch
-checks. **No performance numbers are documented before measuring.**
+`pnpm bench` (harness: `scripts/bench.mjs`) reports, per workload and per
+backend (memory always; PostgreSQL when `AUTHZ_TEST_PG_URL` is set):
+
+- uncached arm: check latency, query shapes, queries per check, and a stage
+  profile aggregating observer `elapsedMs` (where check time goes)
+- decision-cache arm: cold and warm passes over the repeating stream
+- relationship-cache arm: the distinct stream isolating shared
+  sub-traversal collapsing
+- batch arm: `checkBatch` chunked at `maxBatchSize` versus N × `check` on
+  the same stream (version reads per check, `decisionsMatch`)
+
+Workloads cover simple RBAC (`small`), scale (`medium`), fan-out
+(`deep-fanout`), and the wide-clause `large-policy` variant with an extra
+hierarchy level. **No performance numbers are documented before measuring**
+— the measured values live in `roadmap.md` Phase 7.
 
 ## Rules
 

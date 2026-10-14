@@ -19,6 +19,16 @@
  * Phase 7 (ADR-0021/0022/0023) adds a cache arm per workload: decision-cache
  * cold and warm passes over the repeating stream, and a relationship-query
  * cache arm over a stream of distinct checks that share sub-traversals.
+ *
+ * Completing Phase 7 adds three things. First, **stage profiling**: the
+ * uncached arm runs with an observer that accumulates elapsedMs per stage, so
+ * each workload prints where check time goes (normalize, policy load,
+ * decision) without touching the engine — aggregation, not instrumentation.
+ * Second, a **batch arm** reporting checkBatch (chunked at maxBatchSize)
+ * against N x check on the same stream, with a counting proxy for version
+ * reads that measures the Phase 7 one-read-per-batch saving as a number.
+ * Third, a **large-policy workload** with a wider clause set and a deeper
+ * resource hierarchy, exercising traversal depth and clause fan-out.
  */
 
 import {
@@ -65,6 +75,101 @@ definition document {
 }
 `;
 
+const POLICY_VIEWER = `  permission read = viewer or editor or owner or organization.read`;
+
+/** The large-policy variant: wider clauses plus a folder level (org -> project -> folder -> document). */
+const POLICY_LARGE = POLICY.replace(
+  POLICY_VIEWER,
+  `  permission read = viewer or editor or owner or organization.read or organization.manage
+  permission comment = viewer or editor or owner
+  permission share = owner or organization.manage`,
+)
+  .replace(
+    `  // Incoming "contains" edge: project --contains--> document.
+  relation project: project via contains
+
+  permission read = project.read
+  permission write = project.write
+  permission delete = project.admin`,
+    `  // Large-policy variant: documents may live in folders (inheriting the
+  // folder's permissions) or directly in projects (the baseline rule).
+  relation project: project via contains
+  relation folder: folder via contains
+
+  permission read = project.read or folder.read
+  permission write = project.write or folder.write
+  permission delete = project.admin or folder.delete`,
+  )
+  .replace(
+    `definition document {`,
+    `definition folder {
+  relation project: project via contains
+
+  permission read = project.read
+  permission write = project.write
+  permission delete = project.admin
+}
+
+definition document {`,
+  );
+
+/**
+ * Same workload with a counting proxy: version reads delta measures the
+ * Phase 7 one-read-per-batch saving — check() reads per item, checkBatch()
+ * once per chunk — as a number rather than an assertion.
+ */
+function withVersionCounter(store) {
+  let versionReads = 0;
+  const proxy = Object.create(store);
+  proxy.getRelationshipVersion = async () => {
+    versionReads += 1;
+    return store.getRelationshipVersion();
+  };
+  return { store: proxy, versions: () => versionReads, resetVersions: () => (versionReads = 0) };
+}
+
+/** Build a deep org -> projects -> folders -> documents graph of the requested size. */
+function buildDeepGraph(orgCount, projectsPerOrg, foldersPerProject, docsPerFolder) {
+  const rels = [];
+  for (let o = 0; o < orgCount; o += 1) {
+    const org = `organization:org_${o}`;
+    for (let u = 0; u < 4; u += 1) {
+      rels.push({ subject: `user:admin_${o}_${u}`, relation: "admin", resource: org });
+    }
+    for (let u = 0; u < 8; u += 1) {
+      rels.push({ subject: `user:member_${o}_${u}`, relation: "member", resource: org });
+    }
+    for (let p = 0; p < projectsPerOrg; p += 1) {
+      const proj = `project:proj_${o}_${p}`;
+      rels.push({ subject: org, relation: "owns", resource: proj });
+      rels.push({ subject: `user:member_${o}_0`, relation: "owner", resource: proj });
+      rels.push({ subject: `user:member_${o}_1`, relation: "editor", resource: proj });
+      rels.push({ subject: `user:member_${o}_2`, relation: "viewer", resource: proj });
+      for (let f = 0; f < foldersPerProject; f += 1) {
+        // Direct project membership decides half the folders: members_0/1
+        // reach their documents through the deep folder path, all others
+        // only through the shallow project path.
+        const deep = f % 2 === 0;
+        const folder = `folder:fold_${o}_${p}_${f}`;
+        rels.push({ subject: proj, relation: "contains", resource: folder });
+        for (let d = 0; d < docsPerFolder; d += 1) {
+          const doc = `document:doc_${o}_${p}_${f}_${d}`;
+          if (deep) rels.push({ subject: folder, relation: "contains", resource: doc });
+          else rels.push({ subject: proj, relation: "contains", resource: doc });
+        }
+        // Even folders are member-governed (owner/member_0 reach through the
+        // deep path); odd folders inherit from the project via the owning
+        // org — both policy levels stay exercised.
+        if (deep) {
+          rels.push({ subject: `user:member_${o}_0`, relation: "owner", resource: folder });
+          rels.push({ subject: `user:member_${o}_1`, relation: "editor", resource: folder });
+        }
+      }
+    }
+  }
+  return rels;
+}
+
 /** Build a synthetic org -> projects -> documents graph of the requested size. */
 function buildGraph(orgCount, projectsPerOrg, docsPerProject) {
   const rels = [];
@@ -97,11 +202,11 @@ function buildGraph(orgCount, projectsPerOrg, docsPerProject) {
  * the benchmark measures the *store*, not two different engines: the only
  * difference between the two arms is where the relationships live.
  */
-async function makeStores(backend, relationships) {
-  if (backend === "postgres") return makePostgresStores(relationships);
+async function makeStores(backend, relationships, policySource = POLICY) {
+  if (backend === "postgres") return makePostgresStores(relationships, policySource);
 
   const policyStore = new InMemoryPolicyStore();
-  const v = await policyStore.publishPolicy({ source: POLICY, format: "text" });
+  const v = await policyStore.publishPolicy({ source: policySource, format: "text" });
   policyStore.setActiveVersion(v.version);
   const relStore = new InMemoryRelationshipStore();
   relStore.addAll(relationships);
@@ -115,7 +220,7 @@ async function makeStores(backend, relationships) {
  * rather than accumulating every run's rows — otherwise run N would be slower
  * than run 1 for reasons that have nothing to do with the store.
  */
-async function makePostgresStores(relationships) {
+async function makePostgresStores(relationships, policySource = POLICY) {
   const {
     PostgresPolicyStore,
     PostgresRelationshipStore,
@@ -135,7 +240,7 @@ async function makePostgresStores(relationships) {
   }
 
   const policyStore = new PostgresPolicyStore(db, { environment: "bench" });
-  const v = await policyStore.publishPolicy({ source: POLICY, format: "text" });
+  const v = await policyStore.publishPolicy({ source: policySource, format: "text" });
   await policyStore.setActiveVersion(v.version);
 
   return {
@@ -157,12 +262,41 @@ function stats(values) {
   };
 }
 
-async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerProject, checks }) {
-  const relationships = buildGraph(orgCount, projectsPerOrg, docsPerProject);
-  const { policyStore, relStore, close } = await makeStores(backend, relationships);
+async function runWorkload({
+  label,
+  backend,
+  orgCount,
+  projectsPerOrg,
+  docsPerProject,
+  checks,
+  // Large-policy workloads: a wider clause set plus an extra hierarchy level,
+  // exercising traversal depth and clause fan-out beyond the Acme baseline.
+  foldersPerProject = 0,
+  policySource = POLICY,
+}) {
+  const deep = foldersPerProject > 0;
+  const relationships = deep
+    ? buildDeepGraph(orgCount, projectsPerOrg, foldersPerProject, docsPerProject)
+    : buildGraph(orgCount, projectsPerOrg, docsPerProject);
+  const { policyStore, relStore, close } = await makeStores(backend, relationships, policySource);
   const instrumented = new InstrumentedRelationshipStore(
     relStore.asRelationshipStore?.() ?? relStore,
   );
+  // Stage profiling (completing Phase 7): the uncached arm aggregates observer
+  // elapsedMs per stage, so each workload reports where check time goes —
+  // normalize, policy load, decision — with no engine changes. A versioned
+  // proxy counts version reads separately for the batch arm below.
+  const stageTotals = new Map();
+  const profiled = new Evaluator({
+    policyStore,
+    relationshipStore: instrumented,
+    limits: { maxTraversalDepth: 12, maxVisitedNodes: 20000 },
+    observer: (event) => {
+      if (event.elapsedMs !== undefined) {
+        stageTotals.set(event.stage, (stageTotals.get(event.stage) ?? 0) + event.elapsedMs);
+      }
+    },
+  });
   const evaluator = new Evaluator({
     policyStore,
     relationshipStore: instrumented,
@@ -175,11 +309,23 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
   const requestAt = (i) => {
     const o = i % orgCount;
     const p = Math.floor(i / orgCount) % projectsPerOrg;
-    const d = Math.floor(i / (orgCount * projectsPerOrg)) % docsPerProject;
+    // Deep workloads address documents through their folders; shallow
+    // workloads address project documents directly. Either way the generator
+    // stays deterministic and shared by every arm.
+    if (!deep) {
+      const d = Math.floor(i / (orgCount * projectsPerOrg)) % docsPerProject;
+      return {
+        subject: `user:member_${o}_${(i % 3) + 1}`,
+        action: "document.read",
+        resource: `document:doc_${o}_${p}_${d}`,
+      };
+    }
+    const f = Math.floor(i / orgCount) % foldersPerProject;
+    const d = Math.floor(i / (orgCount * foldersPerProject)) % docsPerProject;
     return {
       subject: `user:member_${o}_${(i % 3) + 1}`,
       action: "document.read",
-      resource: `document:doc_${o}_${p}_${d}`,
+      resource: `document:doc_${o}_${p}_${f}_${d}`,
     };
   };
   // A second stream for the relationship-cache arm (ADR-0023): every request
@@ -193,13 +339,24 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
     const o = i % orgCount;
     const n = Math.floor(i / orgCount);
     const subjectSlot = n % 8;
-    const docSlot = Math.floor(n / 8) % (projectsPerOrg * docsPerProject);
-    const p = Math.floor(docSlot / docsPerProject);
+    if (!deep) {
+      const docSlot = Math.floor(n / 8) % (projectsPerOrg * docsPerProject);
+      const p = Math.floor(docSlot / docsPerProject);
+      const d = docSlot % docsPerProject;
+      return {
+        subject: `user:member_${o}_${subjectSlot}`,
+        action: "document.read",
+        resource: `document:doc_${o}_${p}_${d}`,
+      };
+    }
+    const docSlot = Math.floor(n / 8) % (projectsPerOrg * foldersPerProject * docsPerProject);
+    const p = Math.floor(docSlot / (foldersPerProject * docsPerProject));
+    const f = Math.floor(docSlot / docsPerProject) % foldersPerProject;
     const d = docSlot % docsPerProject;
     return {
       subject: `user:member_${o}_${subjectSlot}`,
       action: "document.read",
-      resource: `document:doc_${o}_${p}_${d}`,
+      resource: `document:doc_${o}_${p}_${f}_${d}`,
     };
   };
 
@@ -210,7 +367,7 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
     await evaluator.check({
       subject: `user:member_${i % orgCount}_0`,
       action: "document.read",
-      resource: `document:doc_${i % orgCount}_0_0`,
+      resource: deep ? `document:doc_${i % orgCount}_0_0_0` : `document:doc_${i % orgCount}_0_0`,
     });
   }
 
@@ -229,11 +386,12 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
     return { report: instrumented.report(), lat: stats(latencies), decisions };
   };
 
-  const { report, lat, decisions } = await measure(evaluator, checks);
+  const { report, lat, decisions } = await measure(profiled, checks);
   const queriesPerCheck = report.totalCalls / checks;
   console.log(
     `\n[${label}/${backend}] orgs=${orgCount} projects/org=${projectsPerOrg} ` +
-      `docs/project=${docsPerProject} rels=${relationships.length} checks=${checks}`,
+      `docs/project=${docsPerProject}${deep ? ` folders/project=${foldersPerProject}` : ""} ` +
+      `rels=${relationships.length} checks=${checks}${deep ? " policy=large" : ""}`,
   );
   console.log(`  decisions: allow=${decisions.allow} deny=${decisions.deny}`);
   console.log(
@@ -241,6 +399,19 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
       `p95=${lat.p95.toFixed(3)} max=${lat.max.toFixed(3)}`,
   );
   console.log(`  store queries: total=${report.totalCalls} perCheck=${queriesPerCheck.toFixed(2)}`);
+  // Observer stage totals are in wall-clock ms across the whole arm — shares,
+  // not precision timings — so read them as "where check time goes".
+  const stageEntries = [...stageTotals.entries()];
+  if (stageEntries.length > 0) {
+    const stageGrand = stageEntries.reduce((sum, [, total]) => sum + total, 0);
+    const stageCells = stageEntries
+      .sort((a, b) => b[1] - a[1])
+      .map(
+        ([stage, total]) =>
+          `${stage}=${total.toFixed(1)}ms (${stageGrand > 0 ? ((total * 100) / stageGrand).toFixed(0) : "0"}%)`,
+      );
+    console.log(`  stage profile: ${stageCells.join("  ")}`);
+  }
   for (const [shape, s] of Object.entries(report.byShape)) {
     if (s.calls === 0) continue;
     const p = percentiles(s);
@@ -311,6 +482,56 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
       `queries/check=${(distinctCached.report.totalCalls / checks).toFixed(2)} ` +
       `p95=${distinctCached.lat.p95.toFixed(3)}ms entries=${relStats?.size ?? 0} evictions=${relStats?.evictions ?? 0}`,
   );
+  // Batch arm (completing Phase 7): the same request stream through N x check
+  // versus checkBatch chunked at maxBatchSize, over a store that counts
+  // version reads. Single checks pay one version read per item; batched
+  // checks pay one per chunk — same decisions, N-1 fewer reads per chunk.
+  const batchCap = 100;
+  const counted = withVersionCounter(instrumented);
+  const batchEvaluator = new Evaluator({
+    policyStore,
+    relationshipStore: counted.store,
+    limits: { maxTraversalDepth: 12, maxVisitedNodes: 20000 },
+    decisionCache: new DecisionCache({ maxEntries: 100_000, ttlMs: 3_600_000 }),
+  });
+  const batchRequests = Array.from({ length: checks }, (_, i) => requestAt(i));
+  // Single checks, for the version-read baseline of this stream.
+  counted.resetVersions();
+  instrumented.reset();
+  const singleLat = [];
+  const singleDecisions = [];
+  for (const request of batchRequests) {
+    const t0 = performance.now();
+    singleDecisions.push(await batchEvaluator.check(request));
+    singleLat.push(performance.now() - t0);
+  }
+  const singleVersionReads = counted.versions();
+  const singleReport = instrumented.report();
+  // Batched checks over the identical stream, one version read per chunk.
+  counted.resetVersions();
+  instrumented.reset();
+  const batchLat = [];
+  const batchDecisions = [];
+  for (let i = 0; i < batchRequests.length; i += batchCap) {
+    const chunk = batchRequests.slice(i, i + batchCap);
+    const t0 = performance.now();
+    batchDecisions.push(...(await batchEvaluator.checkBatch(chunk)));
+    batchLat.push(performance.now() - t0);
+  }
+  const batchVersionReads = counted.versions();
+  const batchReport = instrumented.report();
+  const batchMatches =
+    batchDecisions.length === singleDecisions.length &&
+    batchDecisions.every((decision, i) => decision.allowed === singleDecisions[i]?.allowed);
+  const perCheck = (latencies) => stats(latencies.map((ms) => ms / batchCap)).mean;
+  console.log(
+    `  batch: singles versionReads=${singleVersionReads} queries/check=${(singleReport.totalCalls / checks).toFixed(2)} ` +
+      `mean/check=${stats(singleLat).mean.toFixed(3)}ms`,
+  );
+  console.log(
+    `  batch: chunked(${batchCap})    versionReads=${batchVersionReads} queries/check=${(batchReport.totalCalls / checks).toFixed(2)} ` +
+      `mean/check=${perCheck(batchLat).toFixed(3)}ms decisionsMatch=${batchMatches}`,
+  );
   await close();
   return {
     backend,
@@ -328,6 +549,12 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
       hitRate: relHitRate,
       lat: distinctCached.lat,
     },
+    batch: {
+      singleVersionReads,
+      batchVersionReads,
+      decisionsMatch: batchMatches,
+      chunkTotal: checks,
+    },
   };
 }
 
@@ -335,6 +562,15 @@ const WORKLOADS = [
   { label: "small", orgCount: 4, projectsPerOrg: 4, docsPerProject: 4, checks: 400 },
   { label: "medium", orgCount: 16, projectsPerOrg: 6, docsPerProject: 6, checks: 1200 },
   { label: "deep-fanout", orgCount: 8, projectsPerOrg: 8, docsPerProject: 20, checks: 1600 },
+  {
+    label: "large-policy",
+    orgCount: 8,
+    projectsPerOrg: 6,
+    foldersPerProject: 4,
+    docsPerProject: 6,
+    checks: 1200,
+    policySource: POLICY_LARGE,
+  },
 ];
 
 async function main() {
@@ -373,6 +609,12 @@ async function main() {
         `  ${"".padEnd(12)} ${"".padEnd(9)} distinct(relcache) hitRate=${r.relationship.hitRate.toFixed(1)}% ` +
           `queries/check ${r.relationship.plainQueriesPerCheck.toFixed(2)} -> ` +
           `${r.relationship.cachedQueriesPerCheck.toFixed(2)} p95=${r.relationship.lat.p95.toFixed(3)}ms`,
+      );
+    }
+    if (r.batch !== undefined) {
+      console.log(
+        `  ${"".padEnd(12)} ${"".padEnd(9)} batch versionReads/check ${(r.batch.singleVersionReads / r.batch.chunkTotal).toFixed(2)} -> ` +
+          `${(r.batch.batchVersionReads / r.batch.chunkTotal).toFixed(2)} decisionsMatch=${r.batch.decisionsMatch}`,
       );
     }
   }

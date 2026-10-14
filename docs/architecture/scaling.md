@@ -1,7 +1,13 @@
 # Scaling
 
-Status: **Design direction.** No performance numbers are claimed before
-benchmarking (Phase 7).
+Status: **Measured where measured, unclaimed elsewhere.** The evaluator
+posture below was a design direction through Phase 6; Phase 7 measured the
+steady-state decision path (`pnpm bench`, values in
+`docs/development/roadmap.md`): 3.67 queries/check uncached across all
+baseline workloads and both backends, 0.00 warm with the decision cache, and
+0.32–0.94 distinct-stream with the relationship query cache. What Phase 7 did
+_not_ measure — list authorization, distributed graphs, multi-region
+behavior — stays unclaimed.
 
 ## The evaluator's scaling posture
 
