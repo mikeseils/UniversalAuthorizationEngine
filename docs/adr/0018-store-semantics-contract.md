@@ -58,6 +58,21 @@ So the contract must be **normative and executable**, not prose.
   removing a non-existent one succeeds. Networks fail, so every mutation must be
   safe to retry. Retried writes must not duplicate or corrupt state.
 - **S6 — Returned rows are frozen** and must not alias mutable internal state.
+- **S11 — The state version is an opaque, side-effect-free token.** Any backend
+  that can mutate relationships must also report _which_ state it holds, as a
+  version token callers compare with `!==` — never parse, order, or
+  arithmetically combine. Reading the version must not advance it: a read that
+  changed the version would invalidate the very cache entry its own token keys
+  (`docs/architecture/caching.md` rule 1). Conversely, a write that actually
+  changes state must change the token, while a no-op write (S5 idempotent
+  re-add, remove of nothing) must not — token churn on unchanged state evicts
+  the whole decision cache on ordinary retry traffic. The token speaks only
+  _that_ something changed, never _what_: it is a global invalidation signal,
+  so scoped invalidation stays a research problem rather than a hidden,
+  unprovable assumption. The version surface is optional on `RelationshipStore`
+  (see `VersionedRelationshipStore`): a backend that cannot report its state
+  simply cannot back a version-keyed cache, and claiming otherwise would make
+  stale-decision serving a silent possibility.
 
 ### 2. `PolicyStore` semantics (normative)
 
@@ -67,6 +82,10 @@ So the contract must be **normative and executable**, not prose.
   threats (`docs/security/threat-model.md`).
 - **S8 — Artifacts are immutable and content-addressed.** A published version's
   `artifact` and `hash` never change; the hash is reproducible from content.
+  Republishing identical content therefore mints a **new** version: versions —
+  not hashes — are the unit of audit, rollback, and pinning (ADR-0019), so a
+  uniqueness constraint on the hash would turn a legitimate republish into a
+  constraint violation instead of a new deployment candidate.
 - **S9 — Unknown versions return `null`,** and only unknown versions do. A
   missing _active_ pointer is an infrastructure error, not a `null`.
 - **S10 — Policy source failures are caller errors.** Malformed source is
@@ -93,6 +112,14 @@ A new backend is not "done" until it runs this suite unmodified.
   not claim conformance.
 - Persistent backends run the same suite, so ADR-0017's decision can be
   re-validated by measurement rather than defended by assertion.
+- Persistent backends are validated against a **live** database, not only the
+  in-process double. The first live Phase 6 run failed twice on defects the
+  double could not express: node-postgres hands back an **array** of results for
+  a multi-statement migration file (so `.rows` was `undefined` and every
+  migration aborted), and the initial policy schema declared the content `hash`
+  `UNIQUE`, contradicting S8. A double can only encode what its author already
+  understood, so the recording double stays the unit-level tool and a real
+  database remains the acceptance gate.
 
 ## Alternatives considered
 

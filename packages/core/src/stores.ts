@@ -47,7 +47,32 @@ export interface PolicyStore {
   getActivePolicy(): Promise<VersionedPolicy>;
   getPolicyVersion(version: string): Promise<VersionedPolicy | null>;
   publishPolicy(policy: PolicySource): Promise<VersionedPolicy>;
+  /**
+   * Explicitly activate a published version (deployment act, ADR-0018 S7).
+   *
+   * Optional because read-only data-plane facades may expose only the read
+   * side. Where present it MAY be async: persistent backends must read the
+   * version row and commit the deployment pointer before activation is
+   * visible. Callers `await` unconditionally — awaiting a sync `void`
+   * return is a harmless no-op.
+   */
+  setActiveVersion?(version: string): void | Promise<void>;
 }
+
+/**
+ * A `PolicyStore` whose activation surface is present — the **control-plane**
+ * view (ADR-0007).
+ *
+ * The read side and the deployment side are deliberately separable: a
+ * data-plane facade may expose only reads, which is why `setActiveVersion` is
+ * optional on {@link PolicyStore}. Code that *does* deploy policy (the CLI
+ * activating a compiled file, the SDK publishing and activating) depends on
+ * this view instead, so a store with no activation surface is a type error
+ * rather than a silently skipped deployment.
+ */
+export type ActivatablePolicyStore = PolicyStore & {
+  setActiveVersion(version: string): void | Promise<void>;
+};
 
 /**
  * Retrieval of relationship records (docs/architecture/storage.md). Any query
@@ -57,4 +82,23 @@ export interface PolicyStore {
  */
 export interface RelationshipStore {
   getRelationships(query: RelationshipQuery): Promise<readonly Relationship[]>;
+}
+
+/**
+ * Optional state-version surface for relationship backends (ADR-0018 S11,
+ * Phase 7 decision caching).
+ *
+ * A decision is cacheable only if it is addressable by the state that produced
+ * it (`docs/architecture/caching.md` rule 1). The version is an **opaque
+ * token**: monotone and global, saying only *that* something changed, never
+ * *what* changed. Callers compare tokens with `!==` — they never parse, order,
+ * or arithmetically combine them.
+ *
+ * Optional (not part of the read contract) so existing single-purpose
+ * `RelationshipStore` facades keep working: a backend that cannot report state
+ * simply cannot back a version-keyed decision cache. Where present it MUST be
+ * side-effect free — observing the version must never advance it.
+ */
+export interface VersionedRelationshipStore extends RelationshipStore {
+  getRelationshipVersion(): Promise<string>;
 }

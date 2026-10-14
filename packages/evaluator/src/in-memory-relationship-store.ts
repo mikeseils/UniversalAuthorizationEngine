@@ -1,4 +1,9 @@
-import { Relationship, RelationshipQuery, parseRelationship } from "@uae/core";
+import {
+  Relationship,
+  RelationshipQuery,
+  VersionedRelationshipStore,
+  parseRelationship,
+} from "@uae/core";
 
 /**
  * In-memory `RelationshipStore` (Phase 2): unit tests, local development,
@@ -17,6 +22,14 @@ export class InMemoryRelationshipStore {
   /** Current relationship state version (changes on any mutation). */
   get relationshipVersion(): number {
     return this.versionCounter;
+  }
+
+  /**
+   * Opaque state token (ADR-0018 S11): the counter rendered as a string.
+   * Side-effect free — reading never advances it.
+   */
+  getRelationshipVersion(): Promise<string> {
+    return Promise.resolve(String(this.versionCounter));
   }
 
   /** Add a relationship (idempotent). Accepts `type:id` strings or objects. */
@@ -48,9 +61,13 @@ export class InMemoryRelationshipStore {
   }
 
   /** Core `RelationshipStore` view over this store. */
-  asRelationshipStore(): Pick<import("@uae/core").RelationshipStore, "getRelationships"> {
+  asRelationshipStore(): Pick<
+    VersionedRelationshipStore,
+    "getRelationships" | "getRelationshipVersion"
+  > {
     return {
       getRelationships: (query: RelationshipQuery) => Promise.resolve(this.query(query)),
+      getRelationshipVersion: () => this.getRelationshipVersion(),
     };
   }
 

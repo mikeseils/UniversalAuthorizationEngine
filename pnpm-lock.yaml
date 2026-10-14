@@ -38,6 +38,9 @@ importers:
       '@uae/evaluator':
         specifier: workspace:*
         version: link:../evaluator
+      '@uae/persistence':
+        specifier: workspace:*
+        version: link:../persistence
       '@uae/policy':
         specifier: workspace:*
         version: link:../policy

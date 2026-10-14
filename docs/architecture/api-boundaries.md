@@ -66,5 +66,17 @@ checkBatch(requests: AuthorizationRequest[]): Promise<AuthorizationDecision[]>
 // explain(...)  listAuthorized(...)
 ```
 
+The evaluator also exports (draft, ADR-0021) the opt-in caching surface:
+
+```ts
+new Evaluator({ ..., decisionCache?: DecisionCache })   // default: no cache
+class DecisionCache { get/set/clear/stats }             // version-keyed entries
+decisionCacheKey(input): string                         // canonical key builder
+```
+
+A `DecisionCache` requires a relationship store with the ADR-0018 S11 version
+surface; construction fails otherwise rather than degrading to an unkeyed
+cache.
+
 The surface stays intentionally small. `listAuthorized()` is not implemented
 until the authorization and storage models support it correctly.

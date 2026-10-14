@@ -96,7 +96,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     name: "check",
     summary: "Evaluate one authorization request",
     usage:
-      "authz check <subject> <action> <resource> [--context json] [--explain level] [--policy file] [--relationships file] [--policy-version v] [--json] [--no-fail-on-deny]",
+      "authz check <subject> <action> <resource> [--context json] [--explain level] [--policy file] [--relationships file] [--policy-version v] [--store memory|postgres] [--json] [--no-fail-on-deny]",
     flags: [
       { name: "--context", kind: "string", value: "json", description: "request context JSON" },
       {
@@ -112,6 +112,12 @@ export const COMMANDS: readonly CommandSpec[] = [
         kind: "string",
         value: "version",
         description: "evaluate an exact policy version (ADR-0019)",
+      },
+      {
+        name: "--store",
+        kind: "string",
+        value: "backend",
+        description: "memory|postgres (or $AUTHZ_STORE); needs $AUTHZ_DATABASE_URL",
       },
       { name: "--json", kind: "boolean", description: "machine-readable output" },
       {

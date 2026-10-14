@@ -7,10 +7,12 @@ import {
   PolicyStore,
   ValidationError,
   VersionedPolicy,
+  VersionedRelationshipStore,
   coerceIdentifier,
   parseAction,
 } from "@uae/core";
 import { isCompiledArtifactShape, PolicyDefinition, PolicyExpression } from "@uae/policy";
+import { DecisionCache, decisionCacheKey } from "./decision-cache.js";
 import { finalize } from "./finalize.js";
 import { EvalState, makeEvaluatorFn } from "./internal-eval.js";
 import { DEFAULT_LIMITS, EvaluationLimits, EvaluationObserver } from "./limits.js";
@@ -28,6 +30,7 @@ export class Evaluator {
   public readonly limits: EvaluationLimits;
   private observer?: EvaluationObserver;
   private readonly evaluate = makeEvaluatorFn();
+  private readonly decisionCache?: DecisionCache;
 
   constructor(deps: EvaluatorDependencies) {
     this.policyStore = deps.policyStore;
@@ -35,6 +38,19 @@ export class Evaluator {
     this.limits = { ...DEFAULT_LIMITS, ...deps.limits };
     if (deps.observer !== undefined) {
       this.observer = deps.observer;
+    }
+    if (deps.decisionCache !== undefined) {
+      // A cache without a version source cannot be keyed by state, and an
+      // unkeyed decision cache is exactly what caching.md rule 1 forbids —
+      // failing here beats serving TTL-stale decisions later (ADR-0021 §6).
+      const versioned = this.relationshipStore as Partial<VersionedRelationshipStore>;
+      if (typeof versioned.getRelationshipVersion !== "function") {
+        throw new ValidationError(
+          "decisionCache",
+          "relationship store does not expose getRelationshipVersion(); version-keyed caching requires the ADR-0018 S11 version surface",
+        );
+      }
+      this.decisionCache = deps.decisionCache;
     }
   }
 
@@ -57,8 +73,48 @@ export class Evaluator {
     const policy = await this.loadPolicy(options?.policyVersion);
     this.emit("policy:loaded", policy.version);
 
+    const level = options?.explanation ?? "none";
+    // Key construction reads the relationship version BEFORE evaluation
+    // (ADR-0021 §2): an entry keyed `v` must be computed from state ≥ `v`, and
+    // the read is side-effect free (S11), so it cannot invalidate its own key.
+    const cacheKey =
+      this.decisionCache === undefined
+        ? undefined
+        : decisionCacheKey({
+            subject,
+            action,
+            resource,
+            policyVersion: policy.version,
+            relationshipVersion: await this.relationshipVersion(),
+            explanationLevel: level,
+            context,
+          });
+    if (cacheKey !== undefined && this.decisionCache !== undefined) {
+      const hit = this.decisionCache.get(cacheKey);
+      if (hit !== undefined) {
+        this.emit("cache:hit");
+        return hit;
+      }
+      this.emit("cache:miss");
+    }
+
     const result = await this.evaluateArtifact(policy, subject, action, resource, context);
-    return finalize(result, policy.version, action, resource, options?.explanation ?? "none");
+    const decision = finalize(result, policy.version, action, resource, level);
+    if (cacheKey !== undefined && this.decisionCache !== undefined) {
+      // `set` refuses `reason: "error"` decisions (ADR-0021 §3); everything
+      // else — including denials — is safe to key by state version.
+      this.decisionCache.set(cacheKey, decision);
+    }
+    return decision;
+  }
+
+  /**
+   * Current relationship-state version (ADR-0018 S11). Only reachable when a
+   * cache is configured — the constructor already guaranteed the method exists
+   * in that case.
+   */
+  private relationshipVersion(): Promise<string> {
+    return (this.relationshipStore as VersionedRelationshipStore).getRelationshipVersion();
   }
 
   /**

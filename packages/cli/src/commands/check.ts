@@ -5,6 +5,7 @@ import type { CliIo } from "../io.js";
 import { decisionJson, makeConsole, renderDecisionLines } from "../render.js";
 import { loadConfigIfPresent, resolvePolicyPath, resolveRelationshipsPath } from "../resolve.js";
 import { loadSession } from "../session.js";
+import { requireConnectionString, resolveStoreBackend } from "../store.js";
 
 const LEVELS: readonly ExplanationLevel[] = ["none", "minimal", "standard", "debug"];
 
@@ -30,33 +31,49 @@ export async function runCheck(command: ParsedCommand, io: CliIo): Promise<ExitC
   // Pinning is opt-in (ADR-0019); omitted means "use the active version".
   const pinned = flagValue(command, "--policy-version");
 
-  const session = await loadSession({ policyFile, relationshipsFile });
-  for (const warning of session.warnings) {
-    con.error(`warning: ${warning}`);
-  }
-  const decision = await session.evaluator.check(
-    {
-      subject,
-      action,
-      resource,
-      ...(context === undefined ? {} : { context }),
-    },
-    {
-      explanation: level,
-      ...(pinned === undefined ? {} : { policyVersion: pinned }),
-    },
-  );
+  // Backend selection is opt-in and explicit (Phase 6): flag, then
+  // $AUTHZ_STORE, then in-memory. Never inferred.
+  const backend = resolveStoreBackend(flagValue(command, "--store"), io.env);
+  const postgres =
+    backend === "postgres" ? { connectionString: requireConnectionString(io.env) } : undefined;
 
-  if (hasFlag(command, "--json")) {
-    con.json({ ok: decision.allowed, decision: decisionJson(decision) });
-  } else {
-    for (const line of renderDecisionLines(decision, con, `${subject} ${action} ${resource}`)) {
-      con.line(line);
+  const session = await loadSession({
+    policyFile,
+    relationshipsFile,
+    ...(postgres === undefined ? {} : { postgres }),
+  });
+  try {
+    for (const warning of session.warnings) {
+      con.error(`warning: ${warning}`);
     }
-  }
+    const decision = await session.evaluator.check(
+      {
+        subject,
+        action,
+        resource,
+        ...(context === undefined ? {} : { context }),
+      },
+      {
+        explanation: level,
+        ...(pinned === undefined ? {} : { policyVersion: pinned }),
+      },
+    );
 
-  if (decision.allowed) return EXIT.ok;
-  return hasFlag(command, "--no-fail-on-deny") ? EXIT.ok : EXIT.denied;
+    if (hasFlag(command, "--json")) {
+      con.json({ ok: decision.allowed, decision: decisionJson(decision) });
+    } else {
+      for (const line of renderDecisionLines(decision, con, `${subject} ${action} ${resource}`)) {
+        con.line(line);
+      }
+    }
+
+    if (decision.allowed) return EXIT.ok;
+    return hasFlag(command, "--no-fail-on-deny") ? EXIT.ok : EXIT.denied;
+  } finally {
+    // Always release the pool: an unclosed pool keeps the process alive after
+    // the decision has already been printed, which looks like a hung CLI.
+    await session.close();
+  }
 }
 
 /**

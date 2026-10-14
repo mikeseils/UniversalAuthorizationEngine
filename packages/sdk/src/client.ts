@@ -1,4 +1,5 @@
 import {
+  ActivatablePolicyStore,
   AuthorizationRequest,
   PolicySource,
   ValidationError,
@@ -70,14 +71,18 @@ export class AuthzClient {
    * Create an in-memory client initialized with policy and relationships.
    */
   static async inMemory(options: InMemoryClientOptions): Promise<AuthzClient> {
-    const policyStore = new InMemoryPolicyStore();
+    // Typed as the core control-plane view so activation is awaited against the
+    // contract (`void | Promise<void>`) rather than the in-memory class's sync
+    // setter: a persistent backend's activation must be awaited, and the client
+    // must not be written against the reference implementation (ADR-0005).
+    const policyStore: ActivatablePolicyStore = new InMemoryPolicyStore();
     const policySource: PolicySource =
       typeof options.policy === "string"
         ? { source: options.policy, format: "text" }
         : options.policy;
 
     const published = await policyStore.publishPolicy(policySource);
-    policyStore.setActiveVersion(published.version);
+    await policyStore.setActiveVersion(published.version);
 
     const relationshipStore = new InMemoryRelationshipStore();
     if (options.relationships !== undefined) {

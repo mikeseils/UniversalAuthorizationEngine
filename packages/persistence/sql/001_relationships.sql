@@ -28,3 +28,19 @@ CREATE INDEX IF NOT EXISTS relationships_subject_idx
 -- Reverse access: "who relates to this resource via this relation?"
 CREATE INDEX IF NOT EXISTS relationships_resource_idx
   ON relationships (resource_type, resource_id, relation);
+
+-- Relationship state version (Phase 7, cache invalidation).
+--
+-- A decision is cacheable only if it is addressable by the state that produced
+-- it (docs/architecture/caching.md rule 1). The version half of the cache key
+-- cannot live in the application: two evaluator processes sharing one database
+-- must never disagree about which state they saw. So the counter lives in the
+-- database itself.
+--
+-- Writes bump it explicitly (see PostgresRelationshipWriter). Reads observe it
+-- through `getRelationshipVersion`. The bump is monotone and global — it does
+-- not say *what* changed, only *that* something did. Scoped invalidation is a
+-- research problem the roadmap defers; global invalidation is always safe and
+-- its correctness is trivially provable, which is what a security-critical
+-- cache needs first.
+CREATE SEQUENCE IF NOT EXISTS relationship_state_version START WITH 1;

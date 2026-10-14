@@ -64,7 +64,29 @@ wiring works on Windows as well as Linux.
 the decision/unavailable outcome taxonomy, per-item batch isolation,
 determinism, and parity with the raw evaluator (the SDK must add no semantics).
 
-### 6. Property tests (Phase 7)
+### 6. Persistence and store-contract tests
+
+`tests/persistence-*.test.ts`, `tests/store-conformance.ts` — the store contract
+(ADR-0018) is expressed **once** and run against every backend, the in-memory
+reference included, so a backend is correct by passing the same spec rather than
+by review:
+
+- `store-conformance.test.ts` — the contract against the in-memory reference.
+- `persistence-sql.test.ts` — SQL construction, identifier handling, error
+  classification, and fail-closed behaviour through a recording `PgQueryable`
+  double. No database required, so it runs on a fresh clone.
+- `persistence-postgres.test.ts` — the same contract against a **live**
+  PostgreSQL server, plus durability across connections and migration
+  idempotency. It skips with an explicit message when `AUTHZ_TEST_PG_URL` is
+  unset (see `local-development.md`).
+
+Both halves are needed. The double runs everywhere and pins the SQL the stores
+issue; the live run is what caught the two defects the double could not express
+— node-postgres returning an **array** of results for a multi-statement
+migration file, and a `UNIQUE` content hash that contradicted S8 by rejecting a
+legitimate republish.
+
+### 7. Property tests (Phase 7)
 
 Invariants, e.g.:
 
@@ -75,7 +97,7 @@ These are covered by concrete cases today (`tests/evaluator-acme.test.ts`,
 `tests/security-*.test.ts`); generative/property-based testing arrives with the
 performance phase.
 
-### 7. Performance tests (Phase 7)
+### 8. Performance tests (Phase 7)
 
 Benchmarks for simple RBAC, deep traversal, large graphs/policies, batch
 checks. **No performance numbers are documented before measuring.**

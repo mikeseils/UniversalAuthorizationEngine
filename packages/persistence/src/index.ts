@@ -13,12 +13,28 @@ export {
   PostgresRelationshipStore,
   PostgresRelationshipWriter,
   buildQuery,
+  bumpRelationshipVersion,
+  getRelationshipVersion,
 } from "./postgres-relationship-store.js";
 export { PostgresPolicyStore } from "./postgres-policy-store.js";
-export { PersistenceError, isPersistenceError, persistenceError } from "./errors.js";
+export {
+  PersistenceError,
+  StoreTimeoutError,
+  StoreUnavailableError,
+  isPersistenceError,
+  persistenceError,
+} from "./errors.js";
 export type { PersistenceErrorReason } from "./errors.js";
-export { runMigrations } from "./migrate.js";
-export { createPgQueryable } from "./pg-adapter.js";
-export type { PgConnectionOptions } from "./pg-adapter.js";
+export { MIGRATIONS_TABLE, runMigrations } from "./migrate.js";
+export {
+  DEFAULT_CONNECTION_TIMEOUT_MS,
+  DEFAULT_IDLE_TIMEOUT_MS,
+  attachPoolErrorHandler,
+  createPgQueryable,
+  handlePoolError,
+  normalizeQueryResult,
+  poolConfig,
+} from "./pg-adapter.js";
+export type { PgConnectionOptions, PoolErrorSource } from "./pg-adapter.js";
 export { readJson } from "./pool.js";
 export type { PgQueryable, PgQueryExecutor, PgQueryResult } from "./pool.js";

@@ -1,6 +1,7 @@
 # Roadmap
 
-Statuses: **Implemented** / **Planned** / **Experimental** / **Deferred**.
+Statuses: **Implemented** / **Planned** / **Experimental** / **Deferred** /
+**In progress**.
 
 ## Phase 0 — Repository foundation ✅ Implemented
 
@@ -102,7 +103,7 @@ PostgreSQL relationship and policy stores (`@uae/persistence`), chosen from
   traversal that would justify a specialized store. The ADR also records
   **reversal triggers**, so the decision is falsifiable rather than dogmatic.
 - **ADR-0018** makes the store semantics **executable**: the normative contract
-  (S1–S10) lives in `tests/store-conformance.ts` and runs against **every**
+  (S1–S11) lives in `tests/store-conformance.ts` and runs against **every**
   backend, the in-memory reference included. A new backend is not done until it
   passes unmodified. The subtle requirements are called out explicitly —
   unbound-means-all, snapshot consistency, deterministic ordering, typed
@@ -113,21 +114,77 @@ PostgreSQL relationship and policy stores (`@uae/persistence`), chosen from
   raises `PolicyNotFoundError` rather than falling back — silently evaluating a
   different policy would produce a decision attributed to a policy that did not
   produce it — and it surfaces as a _caller_ error, not `AUTHZ_UNAVAILABLE`.
+- **ADR-0020** makes the failure taxonomy executable rather than advisory:
+  `StoreUnavailableError` and `StoreTimeoutError` are real subclasses, so a
+  caller branches on `instanceof` instead of parsing `err.code` or
+  `err.message`. The classification table is normative, asserted row by row, and
+  `timeout` is deliberately _not_ folded into `unavailable` — they have the same
+  fail-closed posture but demand different operator responses.
+- The pool is bounded and survives the failure modes `node-postgres` defaults
+  into. `pg` waits **forever** for a pooled client by default, which turns an
+  unreachable database into a hung authorization request, so connection and idle
+  timeouts are set explicitly; and an idle client dropped by the server raises
+  `ECONNRESET` on a promise **nobody is awaiting**, which without a listener
+  becomes an unhandled `'error'` event that kills the host process. A mandatory
+  pool error listener routes those to a sink, falling back to
+  `process.emitWarning` so a disturbance is never lost and never fatal.
+- Concurrency is **proven, not asserted**. Live tests demonstrate atomic batch
+  writes (all-or-nothing), `REPEATABLE READ` snapshot isolation against a
+  concurrent committing writer (no phantom reads), and idempotent concurrent
+  writes resolving to exactly the right row set.
+- Migrations are **tracked**, not merely idempotent: applied files are recorded
+  in `uae_schema_migrations` in the same transaction as the migration body, so a
+  crash can never leave a file marked applied whose schema was never created.
+- **CI provisions PostgreSQL and refuses to skip.** A `postgres:16-alpine`
+  service container runs the suites with `AUTHZ_REQUIRE_PG_TESTS=1`, which turns
+  "Postgres unreachable" from a silent skip into a **failing** suite. Without
+  that guard, a misconfigured service container would report green while testing
+  nothing.
+- The CLI can evaluate against a real database — `authz check --store postgres`
+  (or `AUTHZ_STORE`) with `AUTHZ_DATABASE_URL` — and the same request must yield
+  the same decision from either backend, which is the store contract's whole
+  point. The in-memory default is unchanged.
 - `pg` is confined to `@uae/persistence`; the core keeps zero runtime
   dependencies (ADR-0005). The stores depend on a narrow `PgQueryable`
   interface, not on `pg` directly, so SQL construction, error classification, and
   fail-closed behaviour are unit-tested with **no database present**.
-- **Docker is never required.** With `AUTHZ_TEST_PG_URL` unset, the Postgres
-  suites skip with an explicit message; `pnpm test` stays green on a fresh clone.
+- **Docker is never required for development.** With `AUTHZ_TEST_PG_URL` unset,
+  the Postgres suites skip with an explicit message; `pnpm test` stays green on a
+  fresh clone. CI is the environment where skipping is not allowed.
+- **The live run was the real gate, not a formality.** The first suite run
+  against actual PostgreSQL failed on defects the recording double could not
+  express: node-postgres hands back an **array** of results for a multi-statement
+  migration file (so migrations aborted before a single contract case ran), the
+  initial policy schema declared the content `hash` `UNIQUE`, contradicting S8
+  (republishing identical content must mint a **new** version, because versions,
+  not hashes, are the unit of audit and rollback), and `pg`'s unbounded default
+  wait plus its fatal unhandled-idle-client error would each have taken down a
+  host process rather than failing a test. All are fixed and covered, and a live
+  database stays part of the definition of done for a persistent backend.
+- `pnpm bench` measures **both** backends with one harness. The ADR-0017 claim
+  now holds as a measurement: queries-per-check is **3.67 on memory and 3.67 on
+  PostgreSQL**, identical across a 9x growth in data. The database changes
+  latency (p95 ~0.05ms → ~2ms, dominated by round-trips) but not the shape of
+  the workload, so the indexing conclusion is unaffected.
 
-Schema, indexes, and the idempotency guarantee are documented in
+Schema, indexes, error taxonomy, and the idempotency guarantee are documented in
 `../architecture/storage.md`. Access-pattern measurement: `pnpm bench`.
 
-## Phase 7 — Performance 🔜 Planned
+## Phase 7 — Performance 🟡 In progress
 
-Policy/relationship/decision caching per `../architecture/caching.md`
-(invalidation requirements first), batch evaluation, profiling, benchmarks
-(simple RBAC, deep traversal, large graphs, large policies, batch checks).
+- **Invalidation requirements first**, per `../architecture/caching.md`:
+  **ADR-0018 S11** adds the opaque, side-effect-free relationship-state version
+  every store must expose (conformance-enforced — reading the version never
+  advances it, a no-op write never moves it), and **ADR-0021** implements the
+  version-keyed decision cache: keys incorporate policy + relationship
+  versions so invalidation is deterministic, TTL/LRU are memory bounds only,
+  `reason: "error"` decisions are never cached, entries are frozen against
+  caller-side poisoning, and a cache without a version source is a
+  construction-time error rather than a silently unkeyed cache. Security tests
+  cover revocation/grant immediacy and context/subject isolation of entries;
+  `pnpm bench` measures cold and warm cache passes on both backends.
+- Remaining in this phase: relationship-cache design, profiling, and the
+  extended benchmark matrix (large policies, batch checks).
 
 ## Phase 8 — Production architecture 🔜 Planned
 

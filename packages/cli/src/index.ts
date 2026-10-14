@@ -26,3 +26,11 @@ export type { TestAssertion, TestBlock, TestTarget, TestTuple } from "./test-lan
 export { assertionHolds, runTestBlock } from "./test-language/runner.js";
 export type { AssertionResult } from "./test-language/runner.js";
 export { parseContext } from "./commands/check.js";
+export {
+  DATABASE_ENV,
+  STORE_BACKENDS,
+  STORE_ENV,
+  requireConnectionString,
+  resolveStoreBackend,
+} from "./store.js";
+export type { StoreBackend } from "./store.js";

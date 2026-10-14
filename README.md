@@ -91,7 +91,9 @@ import { Evaluator, InMemoryRelationshipStore } from "@uae/evaluator";
 //    immutable, content-hashed, versioned artifact.
 const policyStore = new InMemoryPolicyStore();
 const published = await policyStore.publishPolicy({ source: policyText, format: "text" });
-policyStore.setActiveVersion(published.version); // activation is explicit
+// Activation is explicit and always awaited: publishing never deploys, and a
+// persistent store's activation is asynchronous (ADR-0018 S7).
+await policyStore.setActiveVersion(published.version);
 
 // 2. Supply relationships through the store interface (in-memory today).
 const relationships = new InMemoryRelationshipStore();

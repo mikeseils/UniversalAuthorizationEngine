@@ -1,4 +1,5 @@
 import type { RelationshipStore } from "@uae/core";
+import type { DecisionCache } from "./decision-cache.js";
 import type { EvaluationLimits, EvaluationObserver } from "./limits.js";
 
 export interface EvaluatorDependencies {
@@ -6,6 +7,14 @@ export interface EvaluatorDependencies {
   readonly relationshipStore: RelationshipStore;
   readonly limits?: Partial<EvaluationLimits>;
   readonly observer?: EvaluationObserver;
+  /**
+   * Opt-in version-keyed decision cache (ADR-0021). Default: no cache, so the
+   * strong-consistency path (`docs/architecture/caching.md` rule 4) remains
+   * the default. When provided, `relationshipStore` must expose
+   * `getRelationshipVersion()` (ADR-0018 S11) — otherwise construction throws
+   * rather than silently degrading to an unkeyed cache.
+   */
+  readonly decisionCache?: DecisionCache;
 }
 
 export interface CheckOptions {

@@ -1,15 +1,17 @@
 # Caching
 
-Status: **Design only.** Do not prematurely optimize — but the invalidation
-requirements below are **preconditions** for implementing decision caching.
+Status: **Decision cache implemented** (Phase 7, ADR-0021 — version-keyed,
+opt-in via `EvaluatorDependencies.decisionCache`). The rules below remain
+binding for anything that extends caching; dependency tracking (rule 2) and
+explicit consistency modes (rule 4) are still future work.
 
 ## Cache types
 
-| Cache              | Value                                      | Risk                                                           | Status        |
-| ------------------ | ------------------------------------------ | -------------------------------------------------------------- | ------------- |
-| Policy cache       | Compiled policy artifact by version hash   | Low — artifacts are immutable                                  | Safe; trivial |
-| Relationship cache | Relationship records / traversal results   | Medium — staleness affects decisions                           | Design        |
-| **Decision cache** | ALLOW/DENY per (subject, action, resource) | **High** — a stale cached decision is a security vulnerability | Gated         |
+| Cache              | Value                                      | Risk                                                           | Status                     |
+| ------------------ | ------------------------------------------ | -------------------------------------------------------------- | -------------------------- |
+| Policy cache       | Compiled policy artifact by version hash   | Low — artifacts are immutable                                  | Safe; trivial              |
+| Relationship cache | Relationship records / traversal results   | Medium — staleness affects decisions                           | Design                     |
+| **Decision cache** | ALLOW/DENY per (subject, action, resource) | **High** — a stale cached decision is a security vulnerability | **Implemented (ADR-0021)** |
 
 ## Decision cache rules (binding before implementation)
 

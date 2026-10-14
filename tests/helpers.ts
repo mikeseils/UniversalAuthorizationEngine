@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AuthorizationRequest, PolicySource } from "../packages/core/src/index.js";
+import {
+  ActivatablePolicyStore,
+  AuthorizationRequest,
+  PolicySource,
+} from "../packages/core/src/index.js";
 import {
   InMemoryPolicyStore,
   StructuredPolicy,
@@ -98,13 +102,19 @@ export function acmeSetup(policy: PolicySource = { source: ACME_POLICY }): AcmeS
   return { policyStore, relationships, evaluator, policy };
 }
 
-/** Publish + activate a policy source, returning the active version string. */
+/**
+ * Publish + activate a policy source, returning the active version string.
+ *
+ * Takes the core control-plane view (ADR-0018 S7), not the in-memory class, so
+ * the helpers work for any backend and `await`ing activation is type-correct
+ * for both the sync reference setter and a persistent backend's async one.
+ */
 export async function publishAndActivate(
-  store: InMemoryPolicyStore,
+  store: ActivatablePolicyStore,
   policy: PolicySource = { source: ACME_POLICY },
 ): Promise<string> {
   const versioned = await store.publishPolicy(policy);
-  store.setActiveVersion(versioned.version);
+  await store.setActiveVersion(versioned.version);
   return versioned.version;
 }
 
@@ -118,11 +128,11 @@ export function readAcmePolicyText(): string {
 
 /** Publish policy *text* (ADR-0012) + activate it, returning the version. */
 export async function publishTextAndActivate(
-  store: InMemoryPolicyStore,
+  store: ActivatablePolicyStore,
   text: string,
 ): Promise<string> {
   const versioned = await store.publishPolicy({ source: text, format: "text" });
-  store.setActiveVersion(versioned.version);
+  await store.setActiveVersion(versioned.version);
   return versioned.version;
 }
 

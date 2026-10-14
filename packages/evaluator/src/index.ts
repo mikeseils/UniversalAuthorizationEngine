@@ -4,6 +4,12 @@
  * DRAFT shapes — see docs/architecture/api-boundaries.md.
  */
 export { Evaluator } from "./evaluator.js";
+export { DecisionCache, decisionCacheKey } from "./decision-cache.js";
+export type {
+  DecisionCacheKeyInput,
+  DecisionCacheOptions,
+  DecisionCacheStats,
+} from "./decision-cache.js";
 export { InMemoryRelationshipStore } from "./in-memory-relationship-store.js";
 export { DEFAULT_LIMITS } from "./limits.js";
 export type { EvaluationLimits, EvaluationObserver } from "./limits.js";

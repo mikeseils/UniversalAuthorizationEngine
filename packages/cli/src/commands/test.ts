@@ -114,6 +114,10 @@ export async function runTest(command: ParsedCommand, io: CliIo): Promise<ExitCo
     );
   }
 
+  // `authz test` always evaluates in-memory (ADR-0014): each test block gets its
+  // own relationship store, so a persistent backend would be bypassed anyway.
+  // Closing is a no-op here and keeps the two commands symmetric.
+  await session.close();
   return ok ? EXIT.ok : EXIT.validation;
 }
 

@@ -58,7 +58,8 @@ See ADR-0005 for package boundaries and rationale.
 - **Relationship store**: interface in core; in-memory implementation first;
   PostgreSQL adapter is the likely first persistent backend (roadmap Phase 6) —
   chosen _after_ benchmarking access patterns.
-- **Caching**: see `caching.md` — decision caching is dangerous and gated on
-  documented invalidation requirements.
+- **Caching**: see `caching.md` — the version-keyed decision cache is
+  implemented (Phase 7, ADR-0021); dependency-tracked scoped invalidation
+  remains future work.
 - **Failure handling**: see `failure-modes.md` — always fail-closed, with the
   DENIED vs AUTHZ_UNAVAILABLE distinction.

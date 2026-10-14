@@ -122,4 +122,12 @@ export class InMemoryPolicyStore implements PolicyStore {
   getActiveVersion(): string | null {
     return this.activeVersion;
   }
+
+  /** Clear all versions and the active pointer (test isolation only). */
+  reset(): Promise<void> {
+    this.versions.clear();
+    this.activeVersion = null;
+    this.nextVersionNumber = 1;
+    return Promise.resolve();
+  }
 }

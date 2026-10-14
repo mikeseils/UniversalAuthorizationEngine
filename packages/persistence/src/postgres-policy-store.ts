@@ -12,14 +12,16 @@ import { PgQueryable, readJson } from "./pool.js";
  * handles persistence. One definition of a valid policy matters because a
  * second SQL-side validator would inevitably drift, and could accept an
  * artifact the evaluator later fails closed on.
+ *
+ * Activation (`setActiveVersion`) is async, unlike the in-memory store's sync
+ * setter: rejecting an unknown version (S9) requires a database read, and
+ * committing the deployment pointer requires a database write. Callers must
+ * `await` it before reading the active policy back.
  */
 export class PostgresPolicyStore implements PolicyStore {
   private readonly db: PgQueryable;
-  private readonly environment: string;
-  private readonly compiler: InMemoryPolicyStore;
-  private nextVersion = 1;
-  private activeVersion: string | null = null;
-  private pendingActivation: string | null = null;
+  readonly environment: string;
+  private compiler: InMemoryPolicyStore;
 
   constructor(db: PgQueryable, options: { environment?: string } = {}) {
     this.db = db;
@@ -68,58 +70,58 @@ export class PostgresPolicyStore implements PolicyStore {
    *
    * Publishing does **not** activate (ADR-0018 S7): activation is a separate,
    * explicit act, so publishing can never change what a running data plane
-   * evaluates.
+   * evaluates. Versions are allocated by the database sequence `policy_versions`
+   * (ADR-0018 S8): every publish mints a distinct version even for identical
+   * content, and distinct store instances sharing one database can never
+   * collide on a per-instance counter. Validation happens BEFORE the sequence
+   * advances: a malformed source is rejected and stores (and allocates)
+   * nothing (S10), so a rejected source never consumes a version number.
    */
   async publishPolicy(policy: PolicySource): Promise<VersionedPolicy> {
-    const compiled = await this.compiler.publishPolicy(policy);
+    const versioned = await this.compiler.publishPolicy(policy);
     // Defensive: never persist an artifact the evaluator could not load.
-    if (!isCompiledArtifactShape(compiled.artifact)) {
+    if (!isCompiledArtifactShape(versioned.artifact)) {
       throw new PolicyStoreError("refusing to persist a defective policy artifact");
     }
-    const version = String(this.nextVersion);
-    this.nextVersion += 1;
-    const warnings = compiled.warnings ?? [];
-    try {
-      await this.db.query(
+    const warnings = versioned.warnings ?? [];
+    // The sequence is authoritative: the version is minted by this INSERT, so a
+    // version row exists only if the statement succeeded. A failed insert may
+    // leave a gap in the sequence, which is harmless — versions are opaque
+    // identifiers, never counts — and two publishes of identical content can
+    // never collapse onto one version (S8).
+    const allocated = await this.db
+      .query<{ version: string }>(
         `INSERT INTO policies (version, hash, artifact, warnings)
-         VALUES ($1, $2, $3::jsonb, $4::jsonb)
-         ON CONFLICT (version) DO NOTHING`,
-        [version, compiled.hash, JSON.stringify(compiled.artifact), JSON.stringify(warnings)],
-      );
-    } catch (error) {
-      throw persistenceError("publishPolicy", error);
+       VALUES (nextval('policy_versions')::text, $1, $2::jsonb, $3::jsonb)
+       RETURNING version`,
+        [versioned.hash, JSON.stringify(versioned.artifact), JSON.stringify(warnings)],
+      )
+      .catch((error: unknown) => {
+        throw persistenceError("publishPolicy", error);
+      });
+    const version = allocated.rows[0]?.version;
+    if (version === undefined) {
+      throw persistenceError("publishPolicy", new Error("database returned no version"));
     }
     return Object.freeze({
       version,
-      hash: compiled.hash,
-      artifact: compiled.artifact,
+      hash: versioned.hash,
+      artifact: versioned.artifact,
       ...(warnings.length === 0 ? {} : { warnings: Object.freeze([...warnings]) }),
     });
   }
 
   /**
-   * Explicitly activate a published version (deployment act).
+   * Explicitly activate a published version (deployment act) and commit it.
    *
-   * Synchronous by design: the conformance contract requires an unknown version
-   * to throw immediately, and activation is a control-plane call whose failure
-   * must be loud rather than silently queued. The write is committed by
-   * {@link activate}, which callers await.
+   * The write is committed before returning: activation must be visible to a
+   * fresh data-plane reader (a new store instance on a new connection) the
+   * moment activation resolves. Unknown versions are rejected (S9).
    */
-  setActiveVersion(version: string): void {
+  async setActiveVersion(version: string): Promise<void> {
     if (!/^[A-Za-z0-9._-]+$/.test(version)) {
       throw new PolicyStoreError(`invalid policy version "${version}"`);
     }
-    this.pendingActivation = version;
-  }
-
-  getActiveVersion(): string | null {
-    return this.activeVersion;
-  }
-
-  /** Commit a pending activation. Call after {@link setActiveVersion}. */
-  async activate(): Promise<void> {
-    const version = this.pendingActivation;
-    if (version === null) return;
     const existing = await this.getPolicyVersion(version);
     if (existing === null) {
       throw new PolicyStoreError(`cannot activate unknown version "${version}"`);
@@ -135,8 +137,45 @@ export class PostgresPolicyStore implements PolicyStore {
     } catch (error) {
       throw persistenceError("activate", error);
     }
-    this.activeVersion = version;
-    this.pendingActivation = null;
+  }
+
+  /** Read the active version pointer without loading the artifact. */
+  async getActiveVersion(): Promise<string | null> {
+    try {
+      const result = await this.db.query<{ version: string }>(
+        "SELECT version FROM policy_deployments WHERE environment = $1",
+        [this.environment],
+      );
+      return result.rows[0]?.version ?? null;
+    } catch (error) {
+      throw persistenceError("getActiveVersion", error);
+    }
+  }
+
+  /**
+   * Test cleanup between conformance cases: clears policy state and the active
+   * pointer, leaving the store indistinguishable from a freshly migrated one —
+   * the same guarantee `InMemoryPolicyStore.reset()` makes.
+   *
+   * `policy_deployments` references `policies`, so both tables truncate in one
+   * statement. `RESTART IDENTITY` is not sufficient for version allocation: it
+   * restarts only sequences *owned* by the truncated tables, and
+   * `policy_versions` is standalone (measured on PostgreSQL 18 — the
+   * truncate leaves its `last_value` untouched). It is restarted explicitly, so
+   * after a reset the next publish mints version `1`, exactly as a fresh
+   * cluster would and exactly as the in-memory store's counter does.
+   *
+   * The local compiler holds no persisted state, but it is recreated so that a
+   * reset store cannot differ from a new one in a way nothing would explain.
+   */
+  async reset(): Promise<void> {
+    try {
+      await this.db.query("TRUNCATE policy_deployments, policies RESTART IDENTITY");
+      await this.db.query("ALTER SEQUENCE policy_versions RESTART WITH 1");
+      this.compiler = new InMemoryPolicyStore();
+    } catch (error) {
+      throw persistenceError("reset", error);
+    }
   }
 }
 

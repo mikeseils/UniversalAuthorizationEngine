@@ -9,17 +9,26 @@
  * patterns, so this harness produces evidence rather than intuition. Per
  * workload it reports the query shapes the evaluator actually issues, queries
  * per check (fan-out multiplier), result-set size distribution, and check
- * latency. Dependency-free; runs against the in-memory store, and the same
- * harness runs against a persistent store so the two are directly comparable.
+ * latency. Dependency-free; runs against the in-memory store by default, and
+ * the **same** harness also runs against PostgreSQL when `AUTHZ_TEST_PG_URL`
+ * is set, so the two backends are directly comparable.
+ *
+ *   pnpm bench                                  # in-memory only
+ *   AUTHZ_TEST_PG_URL=postgres://… pnpm bench    # in-memory AND Postgres
  */
 
 import {
+  DecisionCache,
   Evaluator,
   InMemoryRelationshipStore,
   InstrumentedRelationshipStore,
   percentiles,
 } from "../packages/evaluator/dist/index.js";
 import { InMemoryPolicyStore } from "../packages/policy/dist/index.js";
+
+/** When unset, the benchmark measures the in-memory store only. */
+const PG_URL_ENV = "AUTHZ_TEST_PG_URL";
+const PG_URL = process.env[PG_URL_ENV];
 
 const POLICY = `
 definition organization {
@@ -77,13 +86,59 @@ function buildGraph(orgCount, projectsPerOrg, docsPerProject) {
   return rels;
 }
 
-async function makeEvaluator(relationships) {
+/**
+ * Build the stores a workload runs against.
+ *
+ * Both backends are handed to the evaluator through the same core interfaces, so
+ * the benchmark measures the *store*, not two different engines: the only
+ * difference between the two arms is where the relationships live.
+ */
+async function makeStores(backend, relationships) {
+  if (backend === "postgres") return makePostgresStores(relationships);
+
   const policyStore = new InMemoryPolicyStore();
   const v = await policyStore.publishPolicy({ source: POLICY, format: "text" });
   policyStore.setActiveVersion(v.version);
   const relStore = new InMemoryRelationshipStore();
   relStore.addAll(relationships);
-  return { policyStore, relStore };
+  return { policyStore, relStore, close: async () => {} };
+}
+
+/**
+ * The same graph, loaded into PostgreSQL.
+ *
+ * The table is truncated first so repeated runs measure the same data volume
+ * rather than accumulating every run's rows — otherwise run N would be slower
+ * than run 1 for reasons that have nothing to do with the store.
+ */
+async function makePostgresStores(relationships) {
+  const {
+    PostgresPolicyStore,
+    PostgresRelationshipStore,
+    PostgresRelationshipWriter,
+    createPgQueryable,
+    runMigrations,
+  } = await import("../packages/persistence/dist/index.js");
+
+  const db = createPgQueryable({ connectionString: PG_URL, max: 10 });
+  await runMigrations(db);
+  await db.query("TRUNCATE relationships");
+  const writer = new PostgresRelationshipWriter(db);
+  // One transaction for the whole graph: a benchmark seeded in batches would
+  // spend its startup in commit round-trips and time the wrong thing.
+  for (let i = 0; i < relationships.length; i += 500) {
+    await writer.addBatch(relationships.slice(i, i + 500));
+  }
+
+  const policyStore = new PostgresPolicyStore(db, { environment: "bench" });
+  const v = await policyStore.publishPolicy({ source: POLICY, format: "text" });
+  await policyStore.setActiveVersion(v.version);
+
+  return {
+    policyStore,
+    relStore: new PostgresRelationshipStore(db),
+    close: () => db.end(),
+  };
 }
 
 function stats(values) {
@@ -98,16 +153,35 @@ function stats(values) {
   };
 }
 
-async function runWorkload({ label, orgCount, projectsPerOrg, docsPerProject, checks }) {
+async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerProject, checks }) {
   const relationships = buildGraph(orgCount, projectsPerOrg, docsPerProject);
-  const { policyStore, relStore } = await makeEvaluator(relationships);
-  const instrumented = new InstrumentedRelationshipStore(relStore.asRelationshipStore());
+  const { policyStore, relStore, close } = await makeStores(backend, relationships);
+  const instrumented = new InstrumentedRelationshipStore(
+    relStore.asRelationshipStore?.() ?? relStore,
+  );
   const evaluator = new Evaluator({
     policyStore,
     relationshipStore: instrumented,
     limits: { maxTraversalDepth: 12, maxVisitedNodes: 20000 },
   });
 
+  // One request generator shared by every arm (Phase 7): the cached and
+  // uncached arms must see an identical request stream or the comparison
+  // measures something else.
+  const requestAt = (i) => {
+    const o = i % orgCount;
+    const p = Math.floor(i / orgCount) % projectsPerOrg;
+    const d = Math.floor(i / (orgCount * projectsPerOrg)) % docsPerProject;
+    return {
+      subject: `user:member_${o}_${(i % 3) + 1}`,
+      action: "document.read",
+      resource: `document:doc_${o}_${p}_${d}`,
+    };
+  };
+
+  // Warm-up: the first Postgres check pays connection setup and a cold buffer
+  // cache. Measuring that would report pool acquisition as query latency and
+  // make the persistent backend look worse than it is.
   for (let i = 0; i < Math.min(50, checks); i += 1) {
     await evaluator.check({
       subject: `user:member_${i % orgCount}_0`,
@@ -116,29 +190,25 @@ async function runWorkload({ label, orgCount, projectsPerOrg, docsPerProject, ch
     });
   }
 
-  instrumented.reset();
-  const latencies = [];
-  const decisions = { allow: 0, deny: 0 };
-  for (let i = 0; i < checks; i += 1) {
-    const o = i % orgCount;
-    const p = Math.floor(i / orgCount) % projectsPerOrg;
-    const d = Math.floor(i / (orgCount * projectsPerOrg)) % docsPerProject;
-    const t0 = performance.now();
-    const decision = await evaluator.check({
-      subject: `user:member_${o}_${(i % 3) + 1}`,
-      action: "document.read",
-      resource: `document:doc_${o}_${p}_${d}`,
-    });
-    latencies.push(performance.now() - t0);
-    if (decision.allowed) decisions.allow += 1;
-    else decisions.deny += 1;
-  }
+  /** Run `count` checks through `target`, recording latency and store load. */
+  const measure = async (target, count) => {
+    instrumented.reset();
+    const latencies = [];
+    const decisions = { allow: 0, deny: 0 };
+    for (let i = 0; i < count; i += 1) {
+      const t0 = performance.now();
+      const decision = await target.check(requestAt(i));
+      latencies.push(performance.now() - t0);
+      if (decision.allowed) decisions.allow += 1;
+      else decisions.deny += 1;
+    }
+    return { report: instrumented.report(), lat: stats(latencies), decisions };
+  };
 
-  const report = instrumented.report();
-  const lat = stats(latencies);
+  const { report, lat, decisions } = await measure(evaluator, checks);
   const queriesPerCheck = report.totalCalls / checks;
   console.log(
-    `\n[${label}] orgs=${orgCount} projects/org=${projectsPerOrg} ` +
+    `\n[${label}/${backend}] orgs=${orgCount} projects/org=${projectsPerOrg} ` +
       `docs/project=${docsPerProject} rels=${relationships.length} checks=${checks}`,
   );
   console.log(`  decisions: allow=${decisions.allow} deny=${decisions.deny}`);
@@ -156,47 +226,108 @@ async function runWorkload({ label, orgCount, projectsPerOrg, docsPerProject, ch
         `resultSize mean=${p.mean.toFixed(2)} p50=${p.p50} p95=${p.p95} max=${p.max}`,
     );
   }
-  return { queriesPerCheck, lat };
+  // Phase 7: same stores, same request stream, with the version-keyed cache
+  // (ADR-0021). "cold" is the first pass over a fresh cache — misses pay a
+  // version read plus a full evaluation — and "warm" is the steady state where
+  // every request repeats earlier state. The gap between them is the cache's
+  // value; the cold pass is its cost.
+  const cache = new DecisionCache({ maxEntries: 100_000, ttlMs: 3_600_000 });
+  const cachedEvaluator = new Evaluator({
+    policyStore,
+    relationshipStore: instrumented,
+    limits: { maxTraversalDepth: 12, maxVisitedNodes: 20000 },
+    decisionCache: cache,
+  });
+  const mark = cache.stats();
+  const cold = await measure(cachedEvaluator, checks);
+  const afterCold = cache.stats();
+  const warm = await measure(cachedEvaluator, checks);
+  const afterWarm = cache.stats();
+  const hitRate = (a, b) => {
+    const h = b.hits - a.hits;
+    const m = b.misses - a.misses;
+    return h + m === 0 ? 0 : (h * 100) / (h + m);
+  };
+  const coldHit = hitRate(mark, afterCold);
+  const warmHit = hitRate(afterCold, afterWarm);
+  console.log(
+    `  cache cold pass: hitRate=${coldHit.toFixed(1)}% ` +
+      `queries/check=${(cold.report.totalCalls / checks).toFixed(2)} ` +
+      `p95=${cold.lat.p95.toFixed(3)}ms`,
+  );
+  console.log(
+    `  cache warm pass: hitRate=${warmHit.toFixed(1)}% ` +
+      `queries/check=${(warm.report.totalCalls / checks).toFixed(2)} ` +
+      `p95=${warm.lat.p95.toFixed(3)}ms entries=${afterWarm.size} evictions=${afterWarm.evictions}`,
+  );
+  await close();
+  return {
+    backend,
+    queriesPerCheck,
+    lat,
+    cached: {
+      coldHit,
+      warmHit,
+      queriesPerCheck: warm.report.totalCalls / checks,
+      lat: warm.lat,
+    },
+  };
 }
+
+const WORKLOADS = [
+  { label: "small", orgCount: 4, projectsPerOrg: 4, docsPerProject: 4, checks: 400 },
+  { label: "medium", orgCount: 16, projectsPerOrg: 6, docsPerProject: 6, checks: 1200 },
+  { label: "deep-fanout", orgCount: 8, projectsPerOrg: 8, docsPerProject: 20, checks: 1600 },
+];
 
 async function main() {
   console.log("Universal Authorization Engine — Phase 6 access-pattern benchmark");
-  console.log(
-    "Store: in-memory reference implementation (Postgres compared in the persistence phase).",
-  );
-  const results = [];
-  results.push(
-    await runWorkload({
-      label: "small",
-      orgCount: 4,
-      projectsPerOrg: 4,
-      docsPerProject: 4,
-      checks: 400,
-    }),
-  );
-  results.push(
-    await runWorkload({
-      label: "medium",
-      orgCount: 16,
-      projectsPerOrg: 6,
-      docsPerProject: 6,
-      checks: 1200,
-    }),
-  );
-  results.push(
-    await runWorkload({
-      label: "deep-fanout",
-      orgCount: 8,
-      projectsPerOrg: 8,
-      docsPerProject: 20,
-      checks: 1600,
-    }),
-  );
-  console.log("\nSummary (queries per check, p95 check ms):");
-  for (const [i, r] of results.entries()) {
+  const backends = PG_URL === undefined ? ["memory"] : ["memory", "postgres"];
+  if (PG_URL === undefined) {
     console.log(
-      `  workload#${i + 1}: queries/check=${r.queriesPerCheck.toFixed(2)} p95=${r.lat.p95.toFixed(3)}ms`,
+      `Store: in-memory reference implementation. Set ${PG_URL_ENV} to also measure ` +
+        "PostgreSQL with the identical harness.",
     );
+  } else {
+    console.log("Stores: in-memory reference and PostgreSQL, same evaluator, same data.");
+  }
+
+  const results = [];
+  for (const backend of backends) {
+    for (const workload of WORKLOADS) {
+      results.push({ label: workload.label, ...(await runWorkload({ backend, ...workload })) });
+    }
+  }
+
+  console.log("\nSummary (queries per check, p95 check ms):");
+  for (const r of results) {
+    console.log(
+      `  ${r.label.padEnd(12)} ${r.backend.padEnd(9)} queries/check=${r.queriesPerCheck.toFixed(2)} ` +
+        `p95=${r.lat.p95.toFixed(3)}ms`,
+    );
+    if (r.cached !== undefined) {
+      console.log(
+        `  ${"".padEnd(12)} ${"".padEnd(9)} cached(warm) hitRate=${r.cached.warmHit.toFixed(1)}% ` +
+          `queries/check=${r.cached.queriesPerCheck.toFixed(2)} p95=${r.cached.lat.p95.toFixed(3)}ms`,
+      );
+    }
+  }
+
+  // The claim ADR-0017 rests on is that the query *count* is a property of the
+  // evaluator, not of the store. Comparing the two backends is what makes that
+  // a measurement rather than an assertion.
+  if (backends.length === 2) {
+    console.log("\nBackend comparison (postgres vs memory):");
+    for (const { label } of WORKLOADS) {
+      const memory = results.find((r) => r.label === label && r.backend === "memory");
+      const pg = results.find((r) => r.label === label && r.backend === "postgres");
+      if (memory === undefined || pg === undefined) continue;
+      const ratio = pg.lat.p95 / memory.lat.p95;
+      console.log(
+        `  ${label.padEnd(12)} p95 overhead x${ratio.toFixed(1)}  ` +
+          `queries/check ${memory.queriesPerCheck.toFixed(2)} -> ${pg.queriesPerCheck.toFixed(2)}`,
+      );
+    }
   }
 }
 

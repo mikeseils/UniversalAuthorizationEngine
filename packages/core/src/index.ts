@@ -38,4 +38,11 @@ export type {
   ExplanationNodeKind,
   ExplanationOutcome,
 } from "./decision.js";
-export type { PolicySource, PolicyStore, RelationshipStore, VersionedPolicy } from "./stores.js";
+export type {
+  ActivatablePolicyStore,
+  PolicySource,
+  PolicyStore,
+  RelationshipStore,
+  VersionedPolicy,
+  VersionedRelationshipStore,
+} from "./stores.js";

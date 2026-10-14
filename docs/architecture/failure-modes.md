@@ -8,18 +8,25 @@ Status: **Binding design.** Fail-closed is invariant from day one (ADR-0006).
 
 ## Failure taxonomy
 
-| Failure                                          | Behavior                                                                                                           |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| Malformed request (bad identifiers/context)      | Rejected at the boundary; caller error; never evaluated                                                            |
-| Malformed policy                                 | Policy fails validation at publish time; never loaded. A defective loaded artifact ⇒ DENY + error explanation node |
-| Missing relationship data                        | Required branch unsatisfied ⇒ DENY (explained)                                                                     |
-| Attribute provider failure/unavailable attribute | Condition unsatisfied ⇒ DENY (explained); provider errors are recorded, not swallowed                              |
-| Traversal bound exceeded / cycle                 | Path terminates ⇒ that branch `unknown` ⇒ DENY (explained)                                                         |
-| Evaluator internal error                         | DENY (or typed infrastructure error), with an error explanation node; never ALLOW                                  |
-| Policy store unavailable                         | Typed infrastructure failure — distinct from DENY (see below)                                                      |
-| Relationship store unavailable                   | Typed infrastructure failure — distinct from DENY                                                                  |
-| Batch larger than `maxBatchSize`                 | Rejected at the boundary (typed `ValidationError`) before any evaluation                                           |
-| Infrastructure failure during a batch            | The whole batch rejects — per-item outcomes are never fabricated (the SDK represents unavailability per item)      |
+| Failure                                          | Behavior                                                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Malformed request (bad identifiers/context)      | Rejected at the boundary; caller error; never evaluated                                                                   |
+| Malformed policy                                 | Policy fails validation at publish time; never loaded. A defective loaded artifact ⇒ DENY + error explanation node        |
+| Missing relationship data                        | Required branch unsatisfied ⇒ DENY (explained)                                                                            |
+| Attribute provider failure/unavailable attribute | Condition unsatisfied ⇒ DENY (explained); provider errors are recorded, not swallowed                                     |
+| Traversal bound exceeded / cycle                 | Path terminates ⇒ that branch `unknown` ⇒ DENY (explained)                                                                |
+| Evaluator internal error                         | DENY (or typed infrastructure error), with an error explanation node; never ALLOW                                         |
+| Policy store unavailable                         | Typed infrastructure failure — distinct from DENY (see below)                                                             |
+| Relationship store unavailable                   | Typed infrastructure failure — distinct from DENY                                                                         |
+| Store timed out                                  | Typed infrastructure failure (`StoreTimeoutError`) — same fail-closed posture as unavailable, different operator response |
+| Database unreachable / connection lost           | Typed infrastructure failure (`StoreUnavailableError`) — never a silent empty result                                      |
+| Schema missing or unmigrated                     | Typed infrastructure failure — indicates a deployment gap, not a denial                                                   |
+| Batch larger than `maxBatchSize`                 | Rejected at the boundary (typed `ValidationError`) before any evaluation                                                  |
+| Infrastructure failure during a batch            | The whole batch rejects — per-item outcomes are never fabricated (the SDK represents unavailability per item)             |
+
+Every infrastructure failure above **throws**; none is ever reported as an empty
+result set. The full driver-signal-to-error mapping is normative in ADR-0020 and
+lives in `architecture/storage.md`.
 
 ## DENIED vs AUTHZ_UNAVAILABLE
 

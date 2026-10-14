@@ -69,6 +69,15 @@ function emptyStats(): ShapeStats {
 export class InstrumentedRelationshipStore implements RelationshipStore {
   private readonly inner: RelationshipStore;
   private readonly now: MonotonicClock;
+  /**
+   * Forwarded ADR-0018 S11 version surface, present only when the wrapped
+   * store has one. Transparency cuts both ways: a wrapper that dropped the
+   * version method would make an instrumented store look versionless to
+   * `Evaluator`'s cache check, so wrapping + caching would fail for a reason
+   * that has nothing to do with either feature. Version reads are deliberately
+   * *not* recorded as relationship queries — they are a different surface.
+   */
+  readonly getRelationshipVersion?: () => Promise<string>;
   private readonly stats: Record<RelationshipQueryShape, ShapeStats> = {
     "subject+relation+resource": emptyStats(),
     "subject+relation": emptyStats(),
@@ -81,6 +90,11 @@ export class InstrumentedRelationshipStore implements RelationshipStore {
     this.inner = inner;
     this.now = now;
     this.startedAt = now();
+    const version = (inner as Partial<import("@uae/core").VersionedRelationshipStore>)
+      .getRelationshipVersion;
+    if (typeof version === "function") {
+      this.getRelationshipVersion = version.bind(inner);
+    }
   }
 
   async getRelationships(query: RelationshipQuery): Promise<readonly Relationship[]> {
