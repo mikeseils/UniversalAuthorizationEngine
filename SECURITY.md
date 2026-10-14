@@ -2,8 +2,25 @@
 
 ## Supported status
 
-This project is in early development (Phase 0–1). It is **not yet production
-software**; do not use it as your sole authorization layer yet.
+Phases 0–6 of the roadmap are **implemented** (domain model, in-memory
+evaluator, policy language, CLI, TypeScript SDK, PostgreSQL persistence) and
+Phase 7 (performance — version-keyed decision caching) is **in progress**.
+
+The engine is usable **embedded** in a TypeScript/Node application today:
+fail-closed evaluation (ADR-0006), immutable versioned policy artifacts,
+adversarial security tests, and PostgreSQL-backed stores validated against a
+live database in CI. What does **not** yet exist is a deployable
+authorization _service_ — the network data plane, control-plane
+authentication, policy artifact signing, deployment tooling, and
+observability are Phase 8 and unbuilt, and relationship writes are not yet
+authorized mutations (threat model rows 1–2).
+
+Until those land, do **not** use this project as your sole authorization
+layer; embed it only after your own review of the deployment, backup, and
+monitoring responsibilities you inherit. Note also that public API shapes
+outside `@uae/sdk` remain draft
+(`docs/architecture/api-boundaries.md`), so only the SDK surface carries a
+stability commitment.
 
 ## Reporting a vulnerability
 
