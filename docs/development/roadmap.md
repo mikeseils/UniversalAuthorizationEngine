@@ -170,7 +170,7 @@ PostgreSQL relationship and policy stores (`@uae/persistence`), chosen from
 Schema, indexes, error taxonomy, and the idempotency guarantee are documented in
 `../architecture/storage.md`. Access-pattern measurement: `pnpm bench`.
 
-## Phase 7 — Performance 🟢 Complete
+## Phase 7 — Performance ✅ Implemented
 
 - **Invalidation requirements first**, per `../architecture/caching.md`:
   **ADR-0018 S11** adds the opaque, side-effect-free relationship-state version
