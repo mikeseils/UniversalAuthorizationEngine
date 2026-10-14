@@ -183,8 +183,20 @@ Schema, indexes, error taxonomy, and the idempotency guarantee are documented in
   construction-time error rather than a silently unkeyed cache. Security tests
   cover revocation/grant immediacy and context/subject isolation of entries;
   `pnpm bench` measures cold and warm cache passes on both backends.
-- Remaining in this phase: relationship-cache design, profiling, and the
-  extended benchmark matrix (large policies, batch checks).
+- **ADR-0022** adds the version-keyed policy artifact cache (immutable,
+  content-addressed artifacts; the active path drops from two store
+  round-trips to one via the `getActiveVersion` pointer surface) and
+  **ADR-0023** the generation-keyed relationship query cache (entries keyed by
+  canonical query + opaque state version, served through a per-check store
+  view — collapses the shared sub-traversals within a burst of distinct
+  checks). The integrated suite `tests/security-caching.test.ts` pins
+  revocation/grant immediacy, policy-republish immediacy, tenant isolation,
+  poisoning resistance, and fail-closed recovery with **all three caches
+  configured together**; `pnpm bench` also reports the distinct-stream
+  relationship-cache arm.
+- Remaining in this phase: profiling beyond the observer `elapsedMs` seed and
+  the extended benchmark matrix (large policies, batch checks); dependency
+  tracking and explicit consistency modes remain open (Phase 10+).
 
 ## Phase 8 — Production architecture 🔜 Planned
 

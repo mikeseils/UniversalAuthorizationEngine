@@ -1,16 +1,17 @@
 # Caching
 
-Status: **Decision cache implemented** (Phase 7, ADR-0021 — version-keyed,
-opt-in via `EvaluatorDependencies.decisionCache`). The rules below remain
-binding for anything that extends caching; dependency tracking (rule 2) and
-explicit consistency modes (rule 4) are still future work.
+Status: **All three caches implemented** (Phase 7): the decision cache
+(ADR-0021, opt-in via `EvaluatorDependencies.decisionCache`), the policy
+artifact cache (ADR-0022, `policyCache`), and the relationship query cache
+(ADR-0023, `relationshipCache`). All are version-keyed, and dependency
+tracking (rule 2) and explicit consistency modes (rule 4) remain future work.
 
 ## Cache types
 
 | Cache              | Value                                      | Risk                                                           | Status                     |
 | ------------------ | ------------------------------------------ | -------------------------------------------------------------- | -------------------------- |
-| Policy cache       | Compiled policy artifact by version hash   | Low — artifacts are immutable                                  | Safe; trivial              |
-| Relationship cache | Relationship records / traversal results   | Medium — staleness affects decisions                           | Design                     |
+| Policy cache       | Compiled policy artifact by version hash   | Low — artifacts are immutable                                  | **Implemented (ADR-0022)** |
+| Relationship cache | Relationship records / traversal results   | Medium — staleness affects decisions                           | **Implemented (ADR-0023)** |
 | **Decision cache** | ALLOW/DENY per (subject, action, resource) | **High** — a stale cached decision is a security vulnerability | **Implemented (ADR-0021)** |
 
 ## Decision cache rules (binding before implementation)
@@ -49,9 +50,13 @@ explicit consistency modes (rule 4) are still future work.
 ## Relationship cache
 
 Safe for immutable snapshots per relationship version. Traversal caches must
-be keyed by the same state versions as decisions.
+be keyed by the same state versions as decisions. Implemented per ADR-0023:
+entries key on the canonical query **and** the opaque state version of the
+check that populated them, served through a per-check store view so the
+version the check was keyed on and the reads it performs cannot diverge.
 
 ## Policy cache
 
 Trivially safe: compiled artifacts are immutable and versioned. A node either
 holds a complete artifact or none — never "sort of current" policy state.
+Implemented per ADR-0022, keyed by version alone.

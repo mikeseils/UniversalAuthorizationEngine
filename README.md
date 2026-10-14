@@ -74,7 +74,7 @@ if (!result.decision.allowed) {
 | CLI (`authz validate/test/check/init`)                        | **Implemented** (Phase 4)      |
 | SDK (`@uae/sdk`: `check`, `checkBatch`, decision/unavailable) | **Implemented** (Phase 5)      |
 | PostgreSQL stores (`@uae/persistence`) + store contract       | **Implemented** (Phase 6)      |
-| Caching, decision-cache invalidation                          | Planned (Phase 7)              |
+| Caching (decision/policy/relationship, version-keyed)         | **Implemented** (Phase 7)      |
 | Hosted / self-hosted service                                  | Planned (Phase 8+)             |
 
 No feature is claimed as implemented above unless it exists in this

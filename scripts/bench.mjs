@@ -15,6 +15,10 @@
  *
  *   pnpm bench                                  # in-memory only
  *   AUTHZ_TEST_PG_URL=postgres://… pnpm bench    # in-memory AND Postgres
+ *
+ * Phase 7 (ADR-0021/0022/0023) adds a cache arm per workload: decision-cache
+ * cold and warm passes over the repeating stream, and a relationship-query
+ * cache arm over a stream of distinct checks that share sub-traversals.
  */
 
 import {
@@ -178,6 +182,26 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
       resource: `document:doc_${o}_${p}_${d}`,
     };
   };
+  // A second stream for the relationship-cache arm (ADR-0023): every request
+  // is a distinct (subject, resource) pair, so the decision cache — which
+  // collapses exact repeats — has nothing to contribute and the measured
+  // difference isolates the query cache. Members 3-7 reach documents only
+  // through organization membership, so each probe still walks
+  // org -> project -> document: the shared sub-traversals the cache exists
+  // to collapse.
+  const requestAtDistinct = (i) => {
+    const o = i % orgCount;
+    const n = Math.floor(i / orgCount);
+    const subjectSlot = n % 8;
+    const docSlot = Math.floor(n / 8) % (projectsPerOrg * docsPerProject);
+    const p = Math.floor(docSlot / docsPerProject);
+    const d = docSlot % docsPerProject;
+    return {
+      subject: `user:member_${o}_${subjectSlot}`,
+      action: "document.read",
+      resource: `document:doc_${o}_${p}_${d}`,
+    };
+  };
 
   // Warm-up: the first Postgres check pays connection setup and a cold buffer
   // cache. Measuring that would report pool acquisition as query latency and
@@ -191,13 +215,13 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
   }
 
   /** Run `count` checks through `target`, recording latency and store load. */
-  const measure = async (target, count) => {
+  const measure = async (target, count, reqAt = requestAt) => {
     instrumented.reset();
     const latencies = [];
     const decisions = { allow: 0, deny: 0 };
     for (let i = 0; i < count; i += 1) {
       const t0 = performance.now();
-      const decision = await target.check(requestAt(i));
+      const decision = await target.check(reqAt(i));
       latencies.push(performance.now() - t0);
       if (decision.allowed) decisions.allow += 1;
       else decisions.deny += 1;
@@ -260,6 +284,33 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
       `queries/check=${(warm.report.totalCalls / checks).toFixed(2)} ` +
       `p95=${warm.lat.p95.toFixed(3)}ms entries=${afterWarm.size} evictions=${afterWarm.evictions}`,
   );
+  // ADR-0023: the relationship query cache, isolated from the decision cache
+  // by the distinct stream — no request repeats, so every store query avoided
+  // here is shared sub-traversal collapsing *within* checks, not across them.
+  // The two arms share the instrumented store and the request generator, as
+  // everywhere else in this harness.
+  const relCacheEvaluator = new Evaluator({
+    policyStore,
+    relationshipStore: instrumented,
+    limits: { maxTraversalDepth: 12, maxVisitedNodes: 20000 },
+    relationshipCache: { maxEntries: 100_000, ttlMs: 3_600_000 },
+  });
+  const distinctPlain = await measure(evaluator, checks, requestAtDistinct);
+  const distinctCached = await measure(relCacheEvaluator, checks, requestAtDistinct);
+  const relStats = relCacheEvaluator.relationshipCache?.stats();
+  const relHitRate =
+    relStats === undefined || relStats.hits + relStats.misses === 0
+      ? 0
+      : (relStats.hits * 100) / (relStats.hits + relStats.misses);
+  console.log(
+    `  distinct uncached:          queries/check=${(distinctPlain.report.totalCalls / checks).toFixed(2)} ` +
+      `p95=${distinctPlain.lat.p95.toFixed(3)}ms`,
+  );
+  console.log(
+    `  distinct + relationshipCache: hitRate=${relHitRate.toFixed(1)}% ` +
+      `queries/check=${(distinctCached.report.totalCalls / checks).toFixed(2)} ` +
+      `p95=${distinctCached.lat.p95.toFixed(3)}ms entries=${relStats?.size ?? 0} evictions=${relStats?.evictions ?? 0}`,
+  );
   await close();
   return {
     backend,
@@ -270,6 +321,12 @@ async function runWorkload({ label, backend, orgCount, projectsPerOrg, docsPerPr
       warmHit,
       queriesPerCheck: warm.report.totalCalls / checks,
       lat: warm.lat,
+    },
+    relationship: {
+      plainQueriesPerCheck: distinctPlain.report.totalCalls / checks,
+      cachedQueriesPerCheck: distinctCached.report.totalCalls / checks,
+      hitRate: relHitRate,
+      lat: distinctCached.lat,
     },
   };
 }
@@ -309,6 +366,13 @@ async function main() {
       console.log(
         `  ${"".padEnd(12)} ${"".padEnd(9)} cached(warm) hitRate=${r.cached.warmHit.toFixed(1)}% ` +
           `queries/check=${r.cached.queriesPerCheck.toFixed(2)} p95=${r.cached.lat.p95.toFixed(3)}ms`,
+      );
+    }
+    if (r.relationship !== undefined) {
+      console.log(
+        `  ${"".padEnd(12)} ${"".padEnd(9)} distinct(relcache) hitRate=${r.relationship.hitRate.toFixed(1)}% ` +
+          `queries/check ${r.relationship.plainQueriesPerCheck.toFixed(2)} -> ` +
+          `${r.relationship.cachedQueriesPerCheck.toFixed(2)} p95=${r.relationship.lat.p95.toFixed(3)}ms`,
       );
     }
   }
