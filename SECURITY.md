@@ -2,10 +2,11 @@
 
 ## Supported status
 
-Phases 0–6 of the roadmap are **implemented** (domain model, in-memory
-evaluator, policy language, CLI, TypeScript SDK, PostgreSQL persistence) and
-Phase 7 (performance — version-keyed decision, policy, and relationship
-caching) is **in progress**.
+Phases 0–7 of the roadmap are **implemented** (domain model, in-memory
+evaluator, policy language, CLI, TypeScript SDK, PostgreSQL persistence, and
+the Phase 7 performance work — version-keyed decision, policy, and
+relationship caching plus the profiling, benchmark matrix, and generative
+property tests).
 
 The engine is usable **embedded** in a TypeScript/Node application today:
 fail-closed evaluation (ADR-0006), immutable versioned policy artifacts,
