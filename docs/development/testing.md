@@ -88,14 +88,16 @@ legitimate republish.
 
 ### 7. Property tests (Phase 7)
 
-Invariants, e.g.:
+`tests/evaluator-property.test.ts` (fast-check, devDependency): generative
+properties over Acme-shaped graphs with the policy fixed to `ACME_POLICY` —
+generated policies would test the generator, not the engine:
 
-- adding an unrelated relationship cannot grant unrelated access
-- removing a required relationship cannot turn deny into allow
-
-These are covered by concrete cases today (`tests/evaluator-acme.test.ts`,
-`tests/security-*.test.ts`); generative/property-based testing arrives with the
-performance phase.
+- removal is monotone (a DENY never becomes an ALLOW)
+- edges from a disjoint identifier namespace cannot change a decision
+- agreement with a naive reference permission closure on every generated
+  graph (catches depth, cycle, and inheritance handling concrete cases miss)
+- a fully-cached evaluator agrees with a fresh one across generated op
+  sequences (grant/revocation immediacy, generatively)
 
 ### 8. Performance tests (Phase 7)
 
