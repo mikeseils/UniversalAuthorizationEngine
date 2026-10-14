@@ -235,7 +235,7 @@ describe("authz test (ADR-0013/0014)", () => {
 
   it("refuses to guess when no tests are configured", async () => {
     const dir = project({ "policy.authz": POLICY });
-    const result = await cli(["test", "--policy", `${dir}\\policy.authz`], { cwd: dir });
+    const result = await cli(["test", "--policy", join(dir, "policy.authz")], { cwd: dir });
     expect(result.code).toBe(EXIT.usage);
     expect(result.err).toContain("no tests configured");
   });
@@ -245,8 +245,8 @@ describe("authz test (ADR-0013/0014)", () => {
     const result = await cli([
       "test",
       "--policy",
-      `${dir}\\policy.authz`,
-      `${dir}\\does-not-exist`,
+      join(dir, "policy.authz"),
+      join(dir, "does-not-exist"),
     ]);
     expect(result.code).toBe(EXIT.usage);
     expect(result.err).toContain("test path not found");
@@ -256,7 +256,7 @@ describe("authz test (ADR-0013/0014)", () => {
     // An empty suite must not silently "succeed" — that is how a broken CI job
     // looks green.
     const dir = project({ "policy.authz": POLICY, "tests/.keep": "" });
-    const result = await cli(["test", "--policy", `${dir}\\policy.authz`, `${dir}\\tests`]);
+    const result = await cli(["test", "--policy", join(dir, "policy.authz"), join(dir, "tests")]);
     expect(result.code).toBe(EXIT.usage);
     expect(result.err).toMatch(/no \.test\.authz files found/u);
   });

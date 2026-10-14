@@ -150,7 +150,15 @@ describe("pool safety (never fatal, never silent)", () => {
 
   it("passes an already-typed failure through unchanged", () => {
     const original = new PersistenceError("unavailable", "already classified");
-    expect(handlePoolError(original)).toBe(original);
+    // A sink is supplied so the pass-through assertion does not emit a real
+    // process warning as a side effect of testing — the default sink is
+    // `process.emitWarning`, and a test that pollutes stderr with its own
+    // fixture messages ("already classified") breaks CI log hygiene for no
+    // coverage gain. The sink also pins the stronger contract: the caller's
+    // handler still receives the *same* object, not a re-wrapped copy.
+    const seen: PersistenceError[] = [];
+    expect(handlePoolError(original, (error) => seen.push(error))).toBe(original);
+    expect(seen).toEqual([original]);
   });
 
   it("attaches an error listener that routes pool errors to the sink", () => {
