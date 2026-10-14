@@ -1,5 +1,6 @@
 import type { RelationshipStore } from "@uae/core";
 import type { DecisionCache } from "./decision-cache.js";
+import type { PolicyCache } from "./policy-cache.js";
 import type { EvaluationLimits, EvaluationObserver } from "./limits.js";
 
 export interface EvaluatorDependencies {
@@ -15,6 +16,14 @@ export interface EvaluatorDependencies {
    * rather than silently degrading to an unkeyed cache.
    */
   readonly decisionCache?: DecisionCache;
+  /**
+   * Opt-in version-keyed policy artifact cache (ADR-0022). Default: no cache,
+   * so every check reads the active policy from the store. Artifacts are
+   * immutable (ADR-0018 S8), so a hit needs no invalidation logic; where the
+   * store also exposes \getActiveVersion\ (the pointer surface), the active
+   * path drops from two store round-trips to one.
+   */
+  readonly policyCache?: PolicyCache;
 }
 
 export interface CheckOptions {

@@ -10,6 +10,8 @@ export type {
   DecisionCacheOptions,
   DecisionCacheStats,
 } from "./decision-cache.js";
+export { PolicyCache } from "./policy-cache.js";
+export type { PolicyCacheOptions, PolicyCacheStats } from "./policy-cache.js";
 export { InMemoryRelationshipStore } from "./in-memory-relationship-store.js";
 export { DEFAULT_LIMITS } from "./limits.js";
 export type { EvaluationLimits, EvaluationObserver } from "./limits.js";

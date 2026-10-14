@@ -13,6 +13,7 @@ import {
 } from "@uae/core";
 import { isCompiledArtifactShape, PolicyDefinition, PolicyExpression } from "@uae/policy";
 import { DecisionCache, decisionCacheKey } from "./decision-cache.js";
+import { PolicyCache } from "./policy-cache.js";
 import { finalize } from "./finalize.js";
 import { EvalState, makeEvaluatorFn } from "./internal-eval.js";
 import {
@@ -37,6 +38,7 @@ export class Evaluator {
   private observer?: EvaluationObserver;
   private readonly evaluate = makeEvaluatorFn();
   private readonly decisionCache?: DecisionCache;
+  private readonly policyCache?: PolicyCache;
 
   constructor(deps: EvaluatorDependencies) {
     this.policyStore = deps.policyStore;
@@ -57,6 +59,9 @@ export class Evaluator {
         );
       }
       this.decisionCache = deps.decisionCache;
+    }
+    if (deps.policyCache !== undefined) {
+      this.policyCache = deps.policyCache;
     }
   }
 
@@ -183,22 +188,63 @@ export class Evaluator {
   }
 
   /**
-   * Resolve the policy artifact to evaluate (ADR-0019).
+   * Resolve the policy artifact to evaluate (ADR-0019, ADR-0022).
    *
    * Pinning is opt-in and the default path is unchanged. An unknown pinned
    * version throws rather than falling back to the active version: silently
    * evaluating a different policy would make an audit trail — the whole point
    * of pinning — actively misleading.
+   *
+   * With a policy cache configured, the artifact is served from it when the
+   * version is known (ADR-0022): artifacts are immutable (ADR-0018 S8), so a
+   * hit needs no invalidation logic. On the active path that also requires
+   * the store's getActiveVersion pointer surface — without it the store's
+   * active-policy read is one atomic operation and is used unchanged.
    */
   private async loadPolicy(version: string | undefined): Promise<VersionedPolicy> {
     if (version === undefined) {
-      return this.policyStore.getActivePolicy();
+      if (
+        this.policyCache === undefined ||
+        typeof this.policyStore.getActiveVersion !== "function"
+      ) {
+        return this.policyStore.getActivePolicy();
+      }
+      const active = await this.policyStore.getActiveVersion();
+      if (active === null) {
+        // No active policy — delegate to getActivePolicy so the store's own
+        // typed error surfaces unchanged (ADR-0018 S9), never a fabricated one.
+        return this.policyStore.getActivePolicy();
+      }
+      return this.loadVersion(active);
     }
-    const pinned = await this.policyStore.getPolicyVersion(version);
-    if (pinned === null) {
+    return this.loadVersion(version);
+  }
+
+  /**
+   * Load one artifact by version, through the policy cache when configured.
+   *
+   * Keyed by version, never invalidated: a superseded version simply stops
+   * being looked up — exactly the discipline the decision cache uses for
+   * relationship versions (ADR-0021 §2).
+   */
+  private async loadVersion(version: string): Promise<VersionedPolicy> {
+    if (this.policyCache === undefined) {
+      const pinned = await this.policyStore.getPolicyVersion(version);
+      if (pinned === null) {
+        throw new PolicyNotFoundError(version);
+      }
+      return pinned;
+    }
+    const cached = this.policyCache.get(version);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const policy = await this.policyStore.getPolicyVersion(version);
+    if (policy === null) {
       throw new PolicyNotFoundError(version);
     }
-    return pinned;
+    this.policyCache.set(version, policy);
+    return policy;
   }
 
   private async evaluateArtifact(

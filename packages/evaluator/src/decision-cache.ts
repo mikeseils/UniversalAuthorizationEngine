@@ -6,6 +6,7 @@ import {
   ValidationError,
 } from "@uae/core";
 import { canonicalJson } from "@uae/policy";
+import { EntryMap } from "./entry-map.js";
 
 /**
  * Version-keyed decision cache (ADR-0021, `docs/architecture/caching.md`).
@@ -20,16 +21,15 @@ import { canonicalJson } from "@uae/policy";
  *
  * Deliberately dumb: it stores finalized decisions and answers get/set. Version
  * reads, key construction, and evaluator-flow ordering live in `Evaluator`,
- * which is the layer that holds the state inputs.
+ * which is the layer that holds the state inputs. The LRU/TTL storage itself
+ * is the shared {@link EntryMap}, so decision, policy, and relationship
+ * caching cannot drift apart in their eviction semantics.
  */
 export class DecisionCache {
-  private readonly entries = new Map<string, Entry>();
+  private readonly entries: EntryMap<AuthorizationDecision>;
   private readonly maxEntries: number;
   private readonly ttlMs: number;
   private readonly now: () => number;
-  private hits = 0;
-  private misses = 0;
-  private evictions = 0;
 
   constructor(options: DecisionCacheOptions = {}) {
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
@@ -47,26 +47,12 @@ export class DecisionCache {
         "must be at least 1ms — TTL is hygiene, not invalidation (ADR-0021 §4), but 0 would make the cache a no-op that still pays a version read",
       );
     }
+    this.entries = new EntryMap(this.maxEntries, this.ttlMs, this.now);
   }
 
   /** Look up a decision; refreshes LRU recency on hit. */
   get(key: string): AuthorizationDecision | undefined {
-    const entry = this.entries.get(key);
-    if (entry === undefined) {
-      this.misses += 1;
-      return undefined;
-    }
-    if (this.now() >= entry.expiresAt) {
-      // Expired: drop it. The miss that follows is safe; serving it would not be.
-      this.entries.delete(key);
-      this.misses += 1;
-      return undefined;
-    }
-    // Re-insert to move to the most-recent end of the LRU order.
-    this.entries.delete(key);
-    this.entries.set(key, entry);
-    this.hits += 1;
-    return entry.decision;
+    return this.entries.get(key);
   }
 
   /**
@@ -77,14 +63,7 @@ export class DecisionCache {
    */
   set(key: string, decision: AuthorizationDecision): boolean {
     if (decision.reason === "error") return false;
-    this.entries.delete(key);
-    this.entries.set(key, { decision: deepFreeze(decision), expiresAt: this.now() + this.ttlMs });
-    while (this.entries.size > this.maxEntries) {
-      const oldest = this.entries.keys().next();
-      if (oldest.done === true) break;
-      this.entries.delete(oldest.value);
-      this.evictions += 1;
-    }
+    this.entries.set(key, deepFreeze(decision));
     return true;
   }
 
@@ -93,10 +72,11 @@ export class DecisionCache {
   }
 
   stats(): DecisionCacheStats {
+    const base = this.entries.stats();
     return {
-      hits: this.hits,
-      misses: this.misses,
-      evictions: this.evictions,
+      hits: base.hits,
+      misses: base.misses,
+      evictions: base.evictions,
       size: this.entries.size,
     };
   }
@@ -120,11 +100,6 @@ export interface DecisionCacheStats {
   /** Entries dropped by LRU capacity (TTL expiry counts as a miss). */
   readonly evictions: number;
   readonly size: number;
-}
-
-interface Entry {
-  readonly decision: AuthorizationDecision;
-  readonly expiresAt: number;
 }
 
 const DEFAULT_MAX_ENTRIES = 10_000;

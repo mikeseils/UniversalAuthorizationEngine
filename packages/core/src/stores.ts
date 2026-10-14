@@ -23,8 +23,8 @@ export interface VersionedPolicy {
 
 /**
  * How {@link PolicySource.source} is expressed (ADR-0012):
- * - `structured` — the compiled representation's input shape (programmatic);
- * - `text` — policy language source (ADR-0012 syntax).
+ * — `structured` — the compiled representation's input shape (programmatic);
+ * — `text` — policy language source (ADR-0012 syntax).
  * When omitted, a string `source` is treated as `text` and anything else as
  * `structured`, so both authoring styles reach the same publish path.
  */
@@ -46,6 +46,18 @@ export interface PolicySource {
 export interface PolicyStore {
   getActivePolicy(): Promise<VersionedPolicy>;
   getPolicyVersion(version: string): Promise<VersionedPolicy | null>;
+  /**
+   * Read the active version pointer without loading the artifact
+   * (Phase 7 policy caching, ADR-0022).
+   *
+   * Optional for the same reason as {@link setActiveVersion}: a store whose
+   * active-policy read is one atomic operation has no separate pointer
+   * surface to expose. Where present it MAY be async. `null` means "nothing
+   * is active" — callers must treat it exactly as `getActivePolicy` would,
+   * which is a typed infrastructure error (ADR-0018 S9), never a fabricated
+   * decision.
+   */
+  getActiveVersion?(): string | null | Promise<string | null>;
   publishPolicy(policy: PolicySource): Promise<VersionedPolicy>;
   /**
    * Explicitly activate a published version (deployment act, ADR-0018 S7).
