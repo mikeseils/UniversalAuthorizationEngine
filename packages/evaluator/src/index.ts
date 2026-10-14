@@ -11,6 +11,8 @@ export type {
   DecisionCacheStats,
 } from "./decision-cache.js";
 export { PolicyCache } from "./policy-cache.js";
+export { RelationshipCache } from "./relationship-cache.js";
+export type { RelationshipCacheOptions, RelationshipCacheStats } from "./relationship-cache.js";
 export type { PolicyCacheOptions, PolicyCacheStats } from "./policy-cache.js";
 export { InMemoryRelationshipStore } from "./in-memory-relationship-store.js";
 export { DEFAULT_LIMITS } from "./limits.js";

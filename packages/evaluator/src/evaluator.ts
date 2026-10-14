@@ -5,6 +5,7 @@ import {
   Identifier,
   PolicyNotFoundError,
   PolicyStore,
+  RelationshipQuery,
   ValidationError,
   VersionedPolicy,
   VersionedRelationshipStore,
@@ -14,6 +15,7 @@ import {
 import { isCompiledArtifactShape, PolicyDefinition, PolicyExpression } from "@uae/policy";
 import { DecisionCache, decisionCacheKey } from "./decision-cache.js";
 import { PolicyCache } from "./policy-cache.js";
+import { RelationshipCache } from "./relationship-cache.js";
 import { finalize } from "./finalize.js";
 import { EvalState, makeEvaluatorFn } from "./internal-eval.js";
 import {
@@ -39,6 +41,12 @@ export class Evaluator {
   private readonly evaluate = makeEvaluatorFn();
   private readonly decisionCache?: DecisionCache;
   private readonly policyCache?: PolicyCache;
+  /**
+   * The relationship query cache in use, when configured (ADR-0023). The
+   * evaluator constructs it around the store it was given — exposed here so
+   * callers can read stats and reset it.
+   */
+  public readonly relationshipCache?: RelationshipCache;
 
   constructor(deps: EvaluatorDependencies) {
     this.policyStore = deps.policyStore;
@@ -63,6 +71,22 @@ export class Evaluator {
     if (deps.policyCache !== undefined) {
       this.policyCache = deps.policyCache;
     }
+    if (deps.relationshipCache !== undefined) {
+      // Same requirement as the decision cache: query caching keys entries by
+      // the state version, so a store that cannot report one cannot be cached
+      // against (ADR-0023, ADR-0018 S11).
+      const versioned = this.relationshipStore as Partial<VersionedRelationshipStore>;
+      if (typeof versioned.getRelationshipVersion !== "function") {
+        throw new ValidationError(
+          "relationshipCache",
+          "relationship store does not expose getRelationshipVersion(); query caching requires the ADR-0018 S11 version surface",
+        );
+      }
+      this.relationshipCache = new RelationshipCache(
+        this.relationshipStore,
+        deps.relationshipCache,
+      );
+    }
   }
 
   /**
@@ -79,12 +103,14 @@ export class Evaluator {
     options?: CheckOptions,
   ): Promise<AuthorizationDecision> {
     const relationshipVersion =
-      this.decisionCache === undefined ? undefined : await this.relationshipVersion();
+      this.decisionCache === undefined && this.relationshipCache === undefined
+        ? undefined
+        : await this.relationshipVersion();
     return this.runCheck(request, options, relationshipVersion);
   }
 
   /**
-   * Sequential batch (Phase 2/7) - concurrency is a performance-phase concern.
+   * Sequential batch (Phase 2/7) — concurrency is a performance-phase concern.
    *
    * Failure semantics, stated precisely because they are security-relevant:
    * *evaluation outcomes* are per-item and each is independently fail-closed, but
@@ -97,7 +123,7 @@ export class Evaluator {
    *
    * With a decision cache configured, the relationship version is read **once
    * for the whole batch**: every item keys to the same token, read at batch
-   * start. The safety property is the per-item one - an entry keyed `v` was
+   * start. The safety property is the per-item one — an entry keyed `v` was
    * computed from state ≥ `v`, and a moved version makes it unreachable -
    * with N-1 fewer reads. An empty batch reads nothing.
    */
@@ -112,7 +138,8 @@ export class Evaluator {
       );
     }
     const relationshipVersion =
-      requests.length > 0 && this.decisionCache !== undefined
+      requests.length > 0 &&
+      (this.decisionCache !== undefined || this.relationshipCache !== undefined)
         ? await this.relationshipVersion()
         : undefined;
     const decisions: AuthorizationDecision[] = [];
@@ -168,7 +195,15 @@ export class Evaluator {
       clock?.emit("cache:miss");
     }
 
-    const result = await this.evaluateArtifact(policy, subject, action, resource, context, clock);
+    const result = await this.evaluateArtifact(
+      policy,
+      subject,
+      action,
+      resource,
+      context,
+      clock,
+      relationshipVersion,
+    );
     const decision = finalize(result, policy.version, action, resource, level);
     if (cacheKey !== undefined && cache !== undefined) {
       // `set` refuses `reason: "error"` decisions (ADR-0021 §3); everything
@@ -180,7 +215,7 @@ export class Evaluator {
 
   /**
    * Current relationship-state version (ADR-0018 S11). Only reachable when a
-   * cache is configured - the constructor already guaranteed the method exists
+   * cache is configured — the constructor already guaranteed the method exists
    * in that case.
    */
   private relationshipVersion(): Promise<string> {
@@ -254,6 +289,7 @@ export class Evaluator {
     resource: Identifier,
     context: AuthorizationContext,
     clock?: StageClock,
+    relationshipVersion?: string,
   ): Promise<import("./finalize.js").ArtifactResult> {
     if (!isCompiledArtifactShape(policy.artifact)) {
       // Defective loaded artifact → fail closed with an explained DENY (ADR-0010).
@@ -298,7 +334,7 @@ export class Evaluator {
       subject,
       context,
       definitions,
-      store: this.relationshipStore,
+      store: this.storeFor(relationshipVersion),
       limits: this.limits,
       visited: new Set<string>(),
       visitedCount: 0,
@@ -306,5 +342,20 @@ export class Evaluator {
     const { value, node } = await this.evaluate(expr, resource, definition, state, 0);
     clock?.emit("decision", value);
     return { value, node, error: false };
+  }
+
+  /**
+   * The store the evaluation queries through: the raw store, or a per-check
+   * view over the relationship cache keyed by this check's state version
+   * (ADR-0023). With no cache configured the raw store is used directly.
+   */
+  private storeFor(version: string | undefined): import("@uae/core").RelationshipStore {
+    const cache = this.relationshipCache;
+    if (cache === undefined || version === undefined) {
+      return this.relationshipStore;
+    }
+    return {
+      getRelationships: (query: RelationshipQuery) => cache.query(query, version),
+    };
   }
 }

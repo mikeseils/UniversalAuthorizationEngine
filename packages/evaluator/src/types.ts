@@ -1,6 +1,7 @@
 import type { RelationshipStore } from "@uae/core";
 import type { DecisionCache } from "./decision-cache.js";
 import type { PolicyCache } from "./policy-cache.js";
+import type { RelationshipCacheOptions } from "./relationship-cache.js";
 import type { EvaluationLimits, EvaluationObserver } from "./limits.js";
 
 export interface EvaluatorDependencies {
@@ -24,6 +25,16 @@ export interface EvaluatorDependencies {
    * path drops from two store round-trips to one.
    */
   readonly policyCache?: PolicyCache;
+  /**
+   * Opt-in relationship query cache (ADR-0023). Takes **options**, not an
+   * instance: the evaluator constructs the cache around the store it was
+   * given, so the version surface it keys on and the store it reads cannot
+   * diverge. The constructed cache is exposed as
+   * \evaluator.relationshipCache\ for stats. Requires the ADR-0018 S11
+   * version surface on \
+elationshipStore\.
+   */
+  readonly relationshipCache?: RelationshipCacheOptions;
 }
 
 export interface CheckOptions {
