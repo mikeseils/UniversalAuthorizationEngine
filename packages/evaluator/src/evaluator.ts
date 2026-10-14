@@ -15,7 +15,13 @@ import { isCompiledArtifactShape, PolicyDefinition, PolicyExpression } from "@ua
 import { DecisionCache, decisionCacheKey } from "./decision-cache.js";
 import { finalize } from "./finalize.js";
 import { EvalState, makeEvaluatorFn } from "./internal-eval.js";
-import { DEFAULT_LIMITS, EvaluationLimits, EvaluationObserver } from "./limits.js";
+import {
+  DEFAULT_LIMITS,
+  EvaluationLimits,
+  EvaluationObserver,
+  makeStageClock,
+  type StageClock,
+} from "./limits.js";
 import { permissionName } from "./permission-name.js";
 import { type CheckOptions, type EvaluatorDependencies } from "./types.js";
 
@@ -59,66 +65,21 @@ export class Evaluator {
    * or parsed identifiers. Malformed requests throw at the boundary
    * (`ValidationError`); infrastructure failures propagate typed errors; every
    * evaluated outcome is fail-closed (ADR-0010).
+   *
+   * With a decision cache configured, the relationship-state version is read
+   * here — once, before evaluation (ADR-0021 §2).
    */
   async check(
     request: AuthorizationRequest,
     options?: CheckOptions,
   ): Promise<AuthorizationDecision> {
-    const subject = coerceIdentifier(request.subject, "subject");
-    const action = parseAction(request.action);
-    const resource = coerceIdentifier(request.resource, "resource");
-    const context: AuthorizationContext = request.context ?? {};
-    this.emit("normalize", `${action} on ${resource.type}:${resource.id}`);
-
-    const policy = await this.loadPolicy(options?.policyVersion);
-    this.emit("policy:loaded", policy.version);
-
-    const level = options?.explanation ?? "none";
-    // Key construction reads the relationship version BEFORE evaluation
-    // (ADR-0021 §2): an entry keyed `v` must be computed from state ≥ `v`, and
-    // the read is side-effect free (S11), so it cannot invalidate its own key.
-    const cacheKey =
-      this.decisionCache === undefined
-        ? undefined
-        : decisionCacheKey({
-            subject,
-            action,
-            resource,
-            policyVersion: policy.version,
-            relationshipVersion: await this.relationshipVersion(),
-            explanationLevel: level,
-            context,
-          });
-    if (cacheKey !== undefined && this.decisionCache !== undefined) {
-      const hit = this.decisionCache.get(cacheKey);
-      if (hit !== undefined) {
-        this.emit("cache:hit");
-        return hit;
-      }
-      this.emit("cache:miss");
-    }
-
-    const result = await this.evaluateArtifact(policy, subject, action, resource, context);
-    const decision = finalize(result, policy.version, action, resource, level);
-    if (cacheKey !== undefined && this.decisionCache !== undefined) {
-      // `set` refuses `reason: "error"` decisions (ADR-0021 §3); everything
-      // else — including denials — is safe to key by state version.
-      this.decisionCache.set(cacheKey, decision);
-    }
-    return decision;
+    const relationshipVersion =
+      this.decisionCache === undefined ? undefined : await this.relationshipVersion();
+    return this.runCheck(request, options, relationshipVersion);
   }
 
   /**
-   * Current relationship-state version (ADR-0018 S11). Only reachable when a
-   * cache is configured — the constructor already guaranteed the method exists
-   * in that case.
-   */
-  private relationshipVersion(): Promise<string> {
-    return (this.relationshipStore as VersionedRelationshipStore).getRelationshipVersion();
-  }
-
-  /**
-   * Sequential batch (Phase 2/7) — concurrency is a performance-phase concern.
+   * Sequential batch (Phase 2/7) - concurrency is a performance-phase concern.
    *
    * Failure semantics, stated precisely because they are security-relevant:
    * *evaluation outcomes* are per-item and each is independently fail-closed, but
@@ -128,6 +89,12 @@ export class Evaluator {
    * distinction that the failure-modes design requires, and fabricating an ALLOW
    * is never acceptable. Per-item unavailability therefore needs a result type
    * that `core` deliberately does not have — it belongs to the SDK (ADR-0016).
+   *
+   * With a decision cache configured, the relationship version is read **once
+   * for the whole batch**: every item keys to the same token, read at batch
+   * start. The safety property is the per-item one - an entry keyed `v` was
+   * computed from state ≥ `v`, and a moved version makes it unreachable -
+   * with N-1 fewer reads. An empty batch reads nothing.
    */
   async checkBatch(
     requests: readonly AuthorizationRequest[],
@@ -139,11 +106,80 @@ export class Evaluator {
         `batch of ${String(requests.length)} exceeds maxBatchSize ${String(this.limits.maxBatchSize)}`,
       );
     }
+    const relationshipVersion =
+      requests.length > 0 && this.decisionCache !== undefined
+        ? await this.relationshipVersion()
+        : undefined;
     const decisions: AuthorizationDecision[] = [];
     for (const request of requests) {
-      decisions.push(await this.check(request, options));
+      decisions.push(await this.runCheck(request, options, relationshipVersion));
     }
     return decisions;
+  }
+
+  /**
+   * One check against a relationship version the caller resolved.
+   *
+   * `check()` resolves the version per item; `checkBatch()` resolves it once
+   * for the whole batch and passes the same token down. Either way the read
+   * happens before evaluation, so an entry keyed `v` is computed from state
+   * >= `v` (ADR-0021 §2).
+   */
+  private async runCheck(
+    request: AuthorizationRequest,
+    options: CheckOptions | undefined,
+    relationshipVersion: string | undefined,
+  ): Promise<AuthorizationDecision> {
+    const subject = coerceIdentifier(request.subject, "subject");
+    const action = parseAction(request.action);
+    const resource = coerceIdentifier(request.resource, "resource");
+    const context: AuthorizationContext = request.context ?? {};
+    const clock = this.observer === undefined ? undefined : makeStageClock(this.observer);
+    clock?.emit("normalize", `${action} on ${resource.type}:${resource.id}`);
+
+    const policy = await this.loadPolicy(options?.policyVersion);
+    clock?.emit("policy:loaded", policy.version);
+
+    const level = options?.explanation ?? "none";
+    const cache = this.decisionCache;
+    const cacheKey =
+      cache !== undefined && relationshipVersion !== undefined
+        ? decisionCacheKey({
+            subject,
+            action,
+            resource,
+            policyVersion: policy.version,
+            relationshipVersion,
+            explanationLevel: level,
+            context,
+          })
+        : undefined;
+    if (cacheKey !== undefined && cache !== undefined) {
+      const hit = cache.get(cacheKey);
+      if (hit !== undefined) {
+        clock?.emit("cache:hit");
+        return hit;
+      }
+      clock?.emit("cache:miss");
+    }
+
+    const result = await this.evaluateArtifact(policy, subject, action, resource, context, clock);
+    const decision = finalize(result, policy.version, action, resource, level);
+    if (cacheKey !== undefined && cache !== undefined) {
+      // `set` refuses `reason: "error"` decisions (ADR-0021 §3); everything
+      // else — including denials — is safe to key by state version.
+      cache.set(cacheKey, decision);
+    }
+    return decision;
+  }
+
+  /**
+   * Current relationship-state version (ADR-0018 S11). Only reachable when a
+   * cache is configured - the constructor already guaranteed the method exists
+   * in that case.
+   */
+  private relationshipVersion(): Promise<string> {
+    return (this.relationshipStore as VersionedRelationshipStore).getRelationshipVersion();
   }
 
   /**
@@ -165,20 +201,13 @@ export class Evaluator {
     return pinned;
   }
 
-  private emit(stage: string, detail?: string): void {
-    if (detail === undefined) {
-      this.observer?.({ stage });
-    } else {
-      this.observer?.({ stage, detail });
-    }
-  }
-
   private async evaluateArtifact(
     policy: VersionedPolicy,
     subject: Identifier,
     action: string,
     resource: Identifier,
     context: AuthorizationContext,
+    clock?: StageClock,
   ): Promise<import("./finalize.js").ArtifactResult> {
     if (!isCompiledArtifactShape(policy.artifact)) {
       // Defective loaded artifact → fail closed with an explained DENY (ADR-0010).
@@ -229,7 +258,7 @@ export class Evaluator {
       visitedCount: 0,
     };
     const { value, node } = await this.evaluate(expr, resource, definition, state, 0);
-    this.emit("decision", value);
+    clock?.emit("decision", value);
     return { value, node, error: false };
   }
 }
