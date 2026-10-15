@@ -7,11 +7,13 @@
 
 Authorization bugs are security bugs, so testing is a first-class concern
 (`docs/development/testing.md`). The framework must work with TypeScript ESM,
-strict settings, Windows, and Node 18, and run fast locally.
+strict settings, Windows, and the supported Node.js LTS runtime, and run fast
+locally.
 
 ## Decision
 
-Use **Vitest** (v2.x, compatible with Node 18) as the test runner.
+Use **Vitest** as the test runner. The current Vitest 4 and Vite 7 toolchain
+requires Node.js 22.13+ or 24+.
 
 ## Comparison
 

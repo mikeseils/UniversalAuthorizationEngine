@@ -139,7 +139,7 @@ in-process today and against a remote data plane later. Design: ADR-0015, ADR-00
 
 ## Development setup
 
-Requires Node.js ≥ 18.14 and pnpm (Docker not required). In PowerShell:
+Requires Node.js 22.13+ or 24+ and pnpm (Docker not required). In PowerShell:
 
 ```powershell
 pnpm install

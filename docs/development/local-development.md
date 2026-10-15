@@ -4,7 +4,7 @@ Windows-first (PowerShell), but everything works on any platform with Node.js.
 
 ## Prerequisites
 
-- **Node.js ≥ 18.14** (`node --version`)
+- **Node.js 22.13+ or 24+** (`node --version`)
 - **pnpm** (already the project's `packageManager`; install via
   `corepack enable` or `npm i -g pnpm`)
 - Git. Docker is **not** required for basic local development.
