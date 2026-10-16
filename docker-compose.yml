@@ -1,0 +1,22 @@
+services:
+  data-plane:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      # Comma-separated API keys; leave empty for dev mode (no auth).
+      UAE_API_KEYS: ${UAE_API_KEYS:-}
+      # Optional: serve a compiled policy artifact from a mounted volume.
+      UAE_ARTIFACT_PATH: ${UAE_ARTIFACT_PATH:-}
+      UAE_PUBLIC_KEYS_PATH: ${UAE_PUBLIC_KEYS_PATH:-}
+      UAE_REQUIRE_SIGNATURE: ${UAE_REQUIRE_SIGNATURE:-false}
+    # volumes:
+    #   - ./artifact:/app/artifact:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
