@@ -8,7 +8,7 @@ import {
 } from "@uae/core";
 import { DEFAULT_LIMITS, Evaluator, InMemoryRelationshipStore } from "@uae/evaluator";
 import { InMemoryPolicyStore } from "@uae/policy";
-import { ClientTransport, InProcessTransport } from "./transport.js";
+import { ClientTransport, HttpTransport, InProcessTransport } from "./transport.js";
 import { CheckOutcome, ClientCheckOptions, ClientRequest, IsAllowedOptions } from "./types.js";
 
 /**
@@ -65,6 +65,16 @@ export class AuthzClient {
    */
   static fromEvaluator(evaluator: Evaluator): AuthzClient {
     return new AuthzClient(new InProcessTransport(evaluator), evaluator.limits.maxBatchSize);
+  }
+
+  /**
+   * Create a client wrapping a remote data-plane node over HTTP.
+   */
+  static fromTransport(
+    baseUrl: string,
+    maxBatchSize: number = DEFAULT_LIMITS.maxBatchSize,
+  ): AuthzClient {
+    return new AuthzClient(new HttpTransport(baseUrl), maxBatchSize);
   }
 
   /**

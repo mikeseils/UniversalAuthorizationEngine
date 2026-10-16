@@ -1,4 +1,4 @@
-import { AuthorizationRequest, PolicyNotFoundError } from "@uae/core";
+import { AuthorizationRequest, Identifier, PolicyNotFoundError, ValidationError } from "@uae/core";
 import { Evaluator } from "@uae/evaluator";
 import { PolicyStoreError } from "@uae/policy";
 import { AuthorizationUnavailableError, UnavailableReason } from "./errors.js";
@@ -62,6 +62,140 @@ export class InProcessTransport implements ClientTransport {
     }
     return outcomes;
   }
+}
+
+/**
+ * HTTP client transport wrapping a remote data-plane node (Phase 8).
+ *
+ * Sends `AuthorizationRequest`s as JSON to `POST /check` and `POST
+ * /checkBatch`. Maps HTTP 503 to `AUTHZ_UNAVAILABLE`, 4xx to `ValidationError`,
+ * and network/infrastructure failures to `AUTHZ_UNAVAILABLE` with reason
+ * `transport_error`.
+ */
+export class HttpTransport implements ClientTransport {
+  private readonly baseUrl: string;
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  }
+
+  async check(request: AuthorizationRequest, _options?: ClientCheckOptions): Promise<CheckOutcome> {
+    return this.request("/check", { method: "POST", body: JSON.stringify(requestToWire(request)) });
+  }
+
+  async checkBatch(
+    requests: readonly AuthorizationRequest[],
+    _options?: ClientCheckOptions,
+  ): Promise<readonly CheckOutcome[]> {
+    const requestBody = JSON.stringify(requests.map(requestToWire));
+    const res = await fetch(`${this.baseUrl}/checkBatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: requestBody,
+    });
+
+    if (res.status === 503) {
+      const batch = (await res.json()) as Array<{
+        outcome: string;
+        error?: { message: string; reason?: string };
+      }>;
+      return batch.map((b) => ({
+        outcome: "unavailable",
+        error: new AuthorizationUnavailableError(
+          (b.error?.reason ?? "transport_error") as UnavailableReason,
+          b.error?.message ?? "engine unavailable",
+        ),
+      }));
+    }
+
+    if (!res.ok) {
+      const errorBody = (await res.json()) as { error?: { message: string } };
+      throw new ValidationError(
+        "request",
+        errorBody.error?.message ?? `HTTP ${String(res.status)}`,
+      );
+    }
+
+    const batch = (await res.json()) as Array<{
+      outcome: string;
+      decision: unknown;
+    }>;
+    if (!batch.every((b) => b.outcome === "decision")) {
+      throw new ValidationError("response", "unexpected response shape from data plane");
+    }
+    return batch.map((b) => ({ outcome: "decision", decision: b.decision as never }));
+  }
+
+  private async request(path: string, init: RequestInit): Promise<CheckOutcome> {
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: init.method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init.headers as Record<string, string> | undefined),
+        },
+        body: init.body,
+      } as RequestInit);
+
+      if (res.status === 503) {
+        const body = (await res.json()) as Record<string, unknown>;
+        const error = body.error as { message?: string; reason?: string } | undefined;
+        return {
+          outcome: "unavailable",
+          error: new AuthorizationUnavailableError(
+            (error?.reason ?? "transport_error") as UnavailableReason,
+            error?.message ?? "engine unavailable",
+          ),
+        };
+      }
+
+      if (!res.ok) {
+        const body = (await res.json()) as Record<string, unknown>;
+        const error = body.error as { message?: string } | undefined;
+        throw new ValidationError("request", error?.message ?? `HTTP ${String(res.status)}`);
+      }
+
+      const body = (await res.json()) as Record<string, unknown>;
+      if (body.outcome !== "decision") {
+        throw new ValidationError("response", "unexpected response shape from data plane");
+      }
+      return { outcome: "decision", decision: body.decision as never };
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        throw error;
+      }
+      return {
+        outcome: "unavailable",
+        error: new AuthorizationUnavailableError(
+          "transport_error",
+          error instanceof Error ? error.message : String(error),
+          error,
+        ),
+      };
+    }
+  }
+}
+
+/**
+ * Convert an {@link AuthorizationRequest} to the wire format used by the data
+ * plane: subject/resource as `type:id` strings.
+ */
+function requestToWire(request: AuthorizationRequest): {
+  readonly subject: string;
+  readonly action: string;
+  readonly resource: string;
+  readonly context?: Record<string, string | number | boolean>;
+} {
+  const toWireId = (value: string | Identifier): string =>
+    typeof value === "string" ? value : `${value.type}:${value.id}`;
+  return {
+    subject: toWireId(request.subject),
+    action: request.action,
+    resource: toWireId(request.resource),
+    ...(request.context === undefined
+      ? {}
+      : { context: request.context as Record<string, string | number | boolean> }),
+  };
 }
 
 /**

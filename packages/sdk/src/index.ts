@@ -11,7 +11,7 @@ export type { InMemoryClientOptions } from "./client.js";
 export { AuthorizationUnavailableError, ValidationError } from "./errors.js";
 export type { UnavailableReason } from "./errors.js";
 
-export { InProcessTransport, toUnavailableError } from "./transport.js";
+export { InProcessTransport, HttpTransport, toUnavailableError } from "./transport.js";
 export type { ClientTransport } from "./transport.js";
 
 export type {
