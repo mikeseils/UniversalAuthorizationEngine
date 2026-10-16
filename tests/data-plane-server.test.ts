@@ -191,6 +191,148 @@ describe("DataPlaneServer", () => {
       await server.close();
     }
   });
+
+  it("rejects malformed JSON with 400, not 500", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, { port: 0 });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid JSON body");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects oversized request bodies with 413", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, { port: 0, maxBodyBytes: 128 });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "x".repeat(512),
+      });
+      expect(res.status).toBe(413);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("request body too large");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not count health probes as checks", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, { port: 0 });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      for (let i = 0; i < 3; i++) {
+        const probe = await fetch(`http://127.0.0.1:${String(addr.port)}/healthz`);
+        expect(probe.status).toBe(200);
+      }
+      const before = await (await fetch(`http://127.0.0.1:${String(addr.port)}/metrics`)).text();
+      expect(before).toContain("uae_checks_total 0");
+
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: "user:member_0_0",
+          action: "document.read",
+          resource: "document:doc_0_0_0",
+        }),
+      });
+      expect(res.status).toBe(200);
+      const after = await (await fetch(`http://127.0.0.1:${String(addr.port)}/metrics`)).text();
+      expect(after).toContain("uae_checks_total 1");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("serves the active policy version from the provider", async () => {
+    const { evaluator, policyStore } = await setup();
+    const server = new DataPlaneServer(evaluator, {
+      port: 0,
+      policyVersion: () => policyStore.getActiveVersion(),
+    });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/version`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { version: string };
+      expect(body.version).toBe("1");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("fails closed on /version when no active policy exists", async () => {
+    const { evaluator } = await setup();
+    const noProvider = new DataPlaneServer(evaluator, { port: 0 });
+    const nullProvider = new DataPlaneServer(evaluator, {
+      port: 0,
+      policyVersion: () => null,
+    });
+    await noProvider.listen();
+    await nullProvider.listen();
+    try {
+      const noAddr = noProvider.address() as { port: number };
+      const nullAddr = nullProvider.address() as { port: number };
+      const resA = await fetch(`http://127.0.0.1:${String(noAddr.port)}/version`);
+      expect(resA.status).toBe(503);
+      const resB = await fetch(`http://127.0.0.1:${String(nullAddr.port)}/version`);
+      expect(resB.status).toBe(503);
+    } finally {
+      await noProvider.close();
+      await nullProvider.close();
+    }
+  });
+
+  it("rate limits check requests with 429 while probes stay answerable", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, { port: 0, rateLimitPerMinute: 2 });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const check = () =>
+        fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: "user:member_0_0",
+            action: "document.read",
+            resource: "document:doc_0_0_0",
+          }),
+        });
+      expect((await check()).status).toBe(200);
+      expect((await check()).status).toBe(200);
+      const limited = await check();
+      expect(limited.status).toBe(429);
+      const body = (await limited.json()) as { error: string };
+      expect(body.error).toBe("rate limit exceeded");
+
+      // Ops probes are outside the limiter: an overloaded data plane must
+      // still answer health checks.
+      const probe = await fetch(`http://127.0.0.1:${String(addr.port)}/healthz`);
+      expect(probe.status).toBe(200);
+      const metrics = await (await fetch(`http://127.0.0.1:${String(addr.port)}/metrics`)).text();
+      expect(metrics).toContain("uae_rate_limited_total 1");
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 async function setup() {
@@ -236,7 +378,7 @@ async function setup() {
     policyStore,
     relationshipStore: relationships.asRelationshipStore(),
   });
-  return { evaluator };
+  return { evaluator, policyStore };
 }
 
 it("returns 503 for unavailable outcomes", async () => {

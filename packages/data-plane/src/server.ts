@@ -19,6 +19,7 @@ class Metrics {
   private checksDenied = 0;
   private checksUnavailable = 0;
   private checksDurationMs = 0;
+  private rateLimited = 0;
 
   incChecksTotal() {
     this.checksTotal += 1;
@@ -34,6 +35,9 @@ class Metrics {
   }
   addChecksDurationMs(ms: number) {
     this.checksDurationMs += ms;
+  }
+  incRateLimited() {
+    this.rateLimited += 1;
   }
 
   /** Prometheus text exposition format. */
@@ -56,21 +60,52 @@ class Metrics {
         `# HELP uae_checks_duration_ms Average check duration in milliseconds`,
         `# TYPE uae_checks_duration_ms gauge`,
         `uae_checks_duration_ms ${avgDurationMs.toFixed(3)}`,
+        `# HELP uae_rate_limited_total Total requests rejected by the rate limiter`,
+        `# TYPE uae_rate_limited_total counter`,
+        `uae_rate_limited_total ${String(this.rateLimited)}`,
       ].join("\n") + "\n"
     );
   }
 }
+
+/** Optional configuration for {@link DataPlaneServer}. */
+export interface DataPlaneServerOptions {
+  readonly port?: number;
+  readonly apiKeys?: readonly string[];
+  /**
+   * Reports the active policy version for `GET /version`. When omitted or
+   * returning no version, `/version` fails closed with 503 — an unversioned
+   * data plane never claims to be serving a policy it cannot name.
+   */
+  readonly policyVersion?: () => string | null | undefined | Promise<string | null | undefined>;
+  /** Max request body size in bytes; larger bodies are rejected with 413. Default: 1 MiB. */
+  readonly maxBodyBytes?: number;
+  /**
+   * Fixed-window requests-per-minute on `/check` and `/checkBatch`, bucketed
+   * per API key (per client address in dev mode). 0 (default) disables.
+   */
+  readonly rateLimitPerMinute?: number;
+  /** Rate-limit window length in milliseconds. Default: 60 000. */
+  readonly rateLimitWindowMs?: number;
+}
+
+/** Default request body cap (bytes): comfortably above any valid batch. */
+export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
 /**
  * Data-plane HTTP server (ADR-0007).
  *
  * Consumes a compiled policy artifact and answers authorization checks without
  * constant control-plane access. Endpoints:
- *   POST /check     — single authorization check
+ *   POST /check      — single authorization check
  *   POST /checkBatch — batch of authorization checks
- *   GET /healthz    — health check (no auth required)
- *   GET /version    — current policy artifact version
- *   GET /metrics    — Prometheus metrics
+ *   GET  /healthz    — health check (no auth required, never counted as a check)
+ *   GET  /version    — active policy artifact version (503 when none: fail-closed)
+ *   GET  /metrics    — Prometheus metrics (no auth required)
+ *
+ * Error taxonomy: 400 invalid JSON body, 401 missing/invalid API key, 404
+ * unknown route, 413 body too large, 429 rate limited, 503 store unavailable
+ * (fail-closed), 500 unexpected internal error.
  *
  * Fail-closed: store unavailability → 503, never a silent DENY/ALLOW.
  * API key authentication is required on all endpoints except /healthz and /metrics.
@@ -80,13 +115,22 @@ export class DataPlaneServer {
   private readonly adapter: EvaluatorAdapter;
   private readonly apiKeys: ReadonlySet<string>;
   private readonly metrics: Metrics;
+  private readonly policyVersion: DataPlaneServerOptions["policyVersion"];
+  private readonly maxBodyBytes: number;
+  private readonly rateLimitPerMinute: number;
+  private readonly rateLimitWindowMs: number;
+  private readonly rateBuckets = new Map<string, { windowStart: number; count: number }>();
   private server: Server | null = null;
 
-  constructor(evaluator: Evaluator, opts: { port?: number; apiKeys?: readonly string[] } = {}) {
+  constructor(evaluator: Evaluator, opts: DataPlaneServerOptions = {}) {
     this.port = opts.port ?? 3000;
     this.adapter = new EvaluatorAdapter(evaluator);
     this.apiKeys = new Set(opts.apiKeys ?? []);
     this.metrics = new Metrics();
+    this.policyVersion = opts.policyVersion;
+    this.maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    this.rateLimitPerMinute = opts.rateLimitPerMinute ?? 0;
+    this.rateLimitWindowMs = opts.rateLimitWindowMs ?? 60_000;
   }
 
   /** Start listening. */
@@ -130,14 +174,44 @@ export class DataPlaneServer {
    * `X-API-Key: <key>`. Returns true when no keys are configured (dev mode)
    * or when the provided key matches one of the configured keys.
    */
+  private presentedKey(req: import("node:http").IncomingMessage): string | null {
+    const auth = req.headers["authorization"];
+    if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7);
+    const key = req.headers["x-api-key"];
+    return typeof key === "string" ? key : null;
+  }
+
   private authenticate(req: import("node:http").IncomingMessage): boolean {
     if (this.apiKeys.size === 0) return true;
-    const auth = req.headers["authorization"];
-    const key =
-      typeof auth === "string" && auth.startsWith("Bearer ")
-        ? auth.slice(7)
-        : req.headers["x-api-key"];
-    return typeof key === "string" && this.apiKeys.has(key);
+    const key = this.presentedKey(req);
+    return key !== null && this.apiKeys.has(key);
+  }
+
+  /**
+   * Fixed-window rate limit (threat model row 12), keyed by the presented API
+   * key — or by client address in dev mode, where no keys exist to bucket by.
+   * Returns true when the request may proceed. Disabled unless configured.
+   */
+  private allowRequest(req: import("node:http").IncomingMessage): boolean {
+    if (this.rateLimitPerMinute <= 0) return true;
+    const now = Date.now();
+    if (this.rateBuckets.size > 10_000) {
+      // Dev-mode buckets key on client IP and would otherwise grow without
+      // bound; expired windows carry no state worth keeping.
+      for (const [key, bucket] of this.rateBuckets) {
+        if (now - bucket.windowStart >= this.rateLimitWindowMs) this.rateBuckets.delete(key);
+      }
+    }
+    const credential = this.apiKeys.size > 0 ? (this.presentedKey(req) ?? "") : "";
+    const bucketKey =
+      credential.length > 0 ? `key:${credential}` : `ip:${req.socket.remoteAddress ?? "unknown"}`;
+    let bucket = this.rateBuckets.get(bucketKey);
+    if (bucket === undefined || now - bucket.windowStart >= this.rateLimitWindowMs) {
+      bucket = { windowStart: now, count: 0 };
+      this.rateBuckets.set(bucketKey, bucket);
+    }
+    bucket.count += 1;
+    return bucket.count <= this.rateLimitPerMinute;
   }
 
   private async handleRequest(
@@ -157,13 +231,24 @@ export class DataPlaneServer {
       return;
     }
 
+    // Rate limit the check endpoints only: ops probes (healthz/metrics) and
+    // /version must stay answerable for exactly the traffic that measures them.
+    const isCheck = method === "POST" && (url === "/check" || url === "/checkBatch");
+    if (isCheck && !this.allowRequest(req)) {
+      this.metrics.incRateLimited();
+      res.writeHead(429);
+      res.end(JSON.stringify({ error: "rate limit exceeded" }));
+      this.log(url === "/checkBatch" ? "checkBatch" : "check", req, 429, startMs, "rate_limited");
+      return;
+    }
+
     try {
       if (method === "GET" && url === "/healthz") {
         res.writeHead(200);
         res.end(JSON.stringify({ status: "ok" }));
-        this.metrics.incChecksTotal();
-        this.metrics.incChecksAllowed();
-        this.log("check", req, 200, startMs, "allowed");
+        // Deliberately not counted as a check: probe traffic must not pollute
+        // uae_checks_* (SLO/alert arithmetic reads those counters).
+        this.log("healthz", req, 200, startMs, "ok");
         return;
       }
       if (method === "GET" && url === "/metrics") {
@@ -172,14 +257,20 @@ export class DataPlaneServer {
         return;
       }
       if (method === "GET" && url === "/version") {
-        // Version comes from the evaluator's policy store — not yet exposed
-        // through EvaluatorAdapter; return a placeholder for Phase 2 of WS-2.
-        res.writeHead(501);
-        res.end(JSON.stringify({ error: "not implemented" }));
+        const version = this.policyVersion === undefined ? null : await this.policyVersion();
+        if (version === null || version === undefined || version.length === 0) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: "no active policy version" }));
+          this.log("version", req, 503, startMs, "unavailable");
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ version }));
+        this.log("version", req, 200, startMs, "ok");
         return;
       }
       if (method === "POST" && url === "/check") {
-        const body = (await readJsonBody(req)) as ClientRequest;
+        const body = (await readJsonBody(req, this.maxBodyBytes)) as ClientRequest;
         const outcome = await this.adapter.check(body);
         const status = outcome.outcome === "unavailable" ? 503 : 200;
         res.writeHead(status);
@@ -199,7 +290,7 @@ export class DataPlaneServer {
         return;
       }
       if (method === "POST" && url === "/checkBatch") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, this.maxBodyBytes);
         if (!Array.isArray(body)) {
           res.writeHead(400);
           res.end(JSON.stringify({ error: "request body must be an array" }));
@@ -225,12 +316,17 @@ export class DataPlaneServer {
       res.writeHead(404);
       res.end(JSON.stringify({ error: "not found" }));
     } catch (error) {
-      res.writeHead(500);
+      // RequestError carries the caller-facing status (400/413); anything else
+      // is an unexpected internal failure and stays a 500.
+      const status = error instanceof RequestError ? error.status : 500;
+      res.writeHead(status);
       res.end(
         JSON.stringify({
           error: error instanceof Error ? error.message : String(error),
         }),
       );
+      const op = url === "/checkBatch" ? "checkBatch" : url === "/version" ? "version" : "check";
+      this.log(op, req, status, startMs, status >= 500 ? "error" : "invalid_request");
     }
   }
 
@@ -272,22 +368,57 @@ export class DataPlaneServer {
   }
 }
 
-async function readJsonBody(req: import("node:http").IncomingMessage): Promise<unknown> {
+/**
+ * Caller-facing request error: the status code is part of the contract, so a
+ * malformed body is a 400 and an oversized one a 413 — never an opaque 500.
+ */
+class RequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "RequestError";
+  }
+}
+
+async function readJsonBody(
+  req: import("node:http").IncomingMessage,
+  maxBytes: number,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk: string | Buffer) => {
-      data += chunk.toString();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let settled = false;
+    req.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        settled = true;
+        reject(new RequestError(413, "request body too large"));
+        req.resume(); // drain the rejected body so the 413 can be written
+        return;
+      }
+      chunks.push(chunk);
     });
     req.on("end", () => {
-      if (data.length === 0) resolve({});
-      else {
-        try {
-          resolve(JSON.parse(data));
-        } catch {
-          reject(new Error("invalid JSON body"));
-        }
+      if (settled) return;
+      settled = true;
+      const data = Buffer.concat(chunks).toString("utf8");
+      if (data.length === 0) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(data));
+      } catch {
+        reject(new RequestError(400, "invalid JSON body"));
       }
     });
-    req.on("error", reject);
+    req.on("error", (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
   });
 }
