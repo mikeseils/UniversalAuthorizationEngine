@@ -81,7 +81,7 @@ A denial (`allowed: false`) is a decision; an infrastructure failure is
   item's infrastructure failure never fabricates decisions nor discards its
   siblings' valid decisions;
 - are transport-agnostic (`ClientTransport`), with an in-process transport
-  today and a network transport reserved for the Phase 8 data plane.
+  today and, since Phase 8, an HTTP transport for the remote data plane.
 
 Client construction is `AuthzClient.fromEvaluator(evaluator)` or the ergonomic
 `AuthzClient.inMemory({ policy, relationships })`. Test suites cover request
@@ -196,10 +196,48 @@ Schema, indexes, error taxonomy, and the idempotency guarantee are documented in
   relationship-cache arm.
 - The phase closes with **stage profiling**, the **extended benchmark matrix**, and **generative property tests**. Every workload's uncached arm aggregates observer `elapsedMs` per stage and prints a stage profile (decision time dominates at 93-99%, policy load ~1%, normalize rounds to zero) with no engine changes. The batch arm reports `checkBatch` chunked at `maxBatchSize` against N x `check` on the same stream: version reads drop from **one per item to one per chunk** (1.00 -> 0.01/check) with `decisionsMatch=true`. The `large-policy` workload adds a `folder` level (org -> project -> folder -> document, wider clauses, mixed shallow/deep allows): **4.17** queries/check uncached, collapsed to 0.32 by the relationship cache at 94% hit rate. `tests/evaluator-property.test.ts` (fast-check) covers removal monotonicity, disjoint-namespace inertness, reference-closure parity, and cached-vs-fresh agreement across generated op sequences. Dependency tracking and explicit consistency modes remain open (Phase 10+).
 
-## Phase 8 — Production architecture 🔜 Planned
+## Phase 8 — Production architecture ✅ Implemented
 
-Control plane, data plane, API, authentication, deployment, observability,
-policy artifact signing, disaster recovery.
+The deployable authorization **service** exists end to end (ADR-0007,
+ADR-0016, ADR-0024), delivered as six workstreams:
+
+- **WS-1 — policy artifact signing (ADR-0024).** Compiled artifacts are
+  signed with Ed25519 over the canonical JSON of `{ artifact, hash }`
+  (`keyId` and algorithm recorded on the artifact). The data-plane loader
+  verifies against a `keyId → PEM` map, and `UAE_REQUIRE_SIGNATURE=true`
+  rejects unsigned artifacts at startup (fail-closed).
+- **WS-2 — data plane (`@uae/data-plane`).** An independently deployable
+  HTTP service: `ArtifactLoader` reads a compiled artifact from disk, an
+  adapter answers `POST /check` and `POST /checkBatch`, and the store
+  error taxonomy maps to HTTP — empty/unavailable store → **503
+  fail-closed**, never a fabricated DENY.
+- **WS-3 — SDK HTTP transport.** `HttpTransport` implements `ClientTransport`
+  across the network boundary without changing the decision/unavailable
+  outcome semantics (the slot ADR-0016 reserved for Phase 8).
+- **WS-4 — API key authentication.** `Authorization: Bearer` or `X-API-Key`
+  on every endpoint except `/healthz`; no keys configured means dev mode —
+  documented as never-for-production.
+- **WS-5 — observability.** Structured JSON logs (one object per line with
+  method, path, status, duration, and outcome) and a Prometheus `/metrics`
+  endpoint (`uae_checks_total`, allowed/denied/unavailable, average check
+  duration).
+- **WS-5b — deployment & disaster recovery.** Multi-stage `Dockerfile`,
+  `docker-compose.yml` (healthcheck, restart policy), the `.env.example`
+  deployment section, the env-driven `packages/data-plane/bin/start.js`
+  entrypoint (graceful SIGINT/SIGTERM shutdown; startup failure logs
+  `startup_failed` and exits non-zero), and
+  `docs/operations/disaster-recovery.md` (backup/restore, key compromise,
+  fail-closed recovery). CI builds the container image and smoke-tests
+  boot, the auth gate (401 without a key), and fail-closed 503 on an
+  empty store.
+
+The control plane remains the CLI/SDK compile-and-sign pipeline handing
+immutable artifacts to data planes — a hosted control-plane service and
+multi-region replication stay deferred (ADR-0007). Open Phase 8 follow-ups:
+relationship ingestion into the deployed data plane (threat model rows 1–2),
+HTTP boundary hardening (400 on malformed JSON, body-size cap, `/version`),
+and service-boundary hardening (rate limiting, non-root image, metrics
+hygiene).
 
 ## Phase 9 — Enterprise features 🔜 Planned
 

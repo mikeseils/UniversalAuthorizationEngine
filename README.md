@@ -64,18 +64,20 @@ if (!result.decision.allowed) {
 
 ## Implementation status
 
-| Area                                                          | Status                         |
-| ------------------------------------------------------------- | ------------------------------ |
-| Repository, tooling, CI, documentation                        | **Implemented**                |
-| Domain model & core types (`@uae/core`)                       | **Implemented** (draft shapes) |
-| Structured policy + versioned store (`@uae/policy`)           | **Implemented** (draft shapes) |
-| In-memory evaluator + explanations (`@uae/evaluator`)         | **Implemented** (draft shapes) |
-| Policy language v1, parser, AST, compiler (`@uae/policy`)     | **Implemented** (v1 subset)    |
-| CLI (`authz validate/test/check/init`)                        | **Implemented** (Phase 4)      |
-| SDK (`@uae/sdk`: `check`, `checkBatch`, decision/unavailable) | **Implemented** (Phase 5)      |
-| PostgreSQL stores (`@uae/persistence`) + store contract       | **Implemented** (Phase 6)      |
-| Caching (decision/policy/relationship, version-keyed)         | **Implemented** (Phase 7)      |
-| Hosted / self-hosted service                                  | Planned (Phase 8+)             |
+| Area                                                            | Status                         |
+| --------------------------------------------------------------- | ------------------------------ |
+| Repository, tooling, CI, documentation                          | **Implemented**                |
+| Domain model & core types (`@uae/core`)                         | **Implemented** (draft shapes) |
+| Structured policy + versioned store (`@uae/policy`)             | **Implemented** (draft shapes) |
+| In-memory evaluator + explanations (`@uae/evaluator`)           | **Implemented** (draft shapes) |
+| Policy language v1, parser, AST, compiler (`@uae/policy`)       | **Implemented** (v1 subset)    |
+| CLI (`authz validate/test/check/init`)                          | **Implemented** (Phase 4)      |
+| SDK (`@uae/sdk`: `check`, `checkBatch`, decision/unavailable)   | **Implemented** (Phase 5)      |
+| PostgreSQL stores (`@uae/persistence`) + store contract         | **Implemented** (Phase 6)      |
+| Caching (decision/policy/relationship, version-keyed)           | **Implemented** (Phase 7)      |
+| Data plane service (`@uae/data-plane`: HTTP, API keys, metrics) | **Implemented** (Phase 8)      |
+| Deployment (Docker, compose, disaster recovery)                 | **Implemented** (Phase 8)      |
+| Hosted service (managed)                                        | Planned (Phase 8+)             |
 
 No feature is claimed as implemented above unless it exists in this
 repository. Full detail: `docs/development/roadmap.md`.
@@ -135,7 +137,8 @@ const outcomes = await authz.checkBatch([req1, req2, req3]);
 Wrap an existing `Evaluator` with `AuthzClient.fromEvaluator(evaluator)`, or
 construct a ready-to-use client with `AuthzClient.inMemory({ policy, relationships })`.
 Transports are pluggable (`ClientTransport`), so the same client code works
-in-process today and against a remote data plane later. Design: ADR-0015, ADR-0016.
+in-process or against a deployed data plane over HTTP (`HttpTransport`).
+Design: ADR-0015, ADR-0016.
 
 ## Development setup
 
@@ -154,7 +157,7 @@ More: `docs/development/local-development.md`.
 ## Repository structure
 
 ```
-├── .github/workflows/     CI (install → typecheck → lint → test → build)
+├── .github/workflows/     CI (install → typecheck → lint → format → test → build → docker)
 ├── docs/
 │   ├── adr/               Architecture decision records
 │   ├── architecture/      Overview, control/data plane, storage, caching, failure modes

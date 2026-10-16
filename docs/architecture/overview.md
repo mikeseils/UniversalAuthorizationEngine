@@ -40,7 +40,7 @@ Dependency rule: arrows point downward only. `core` has no dependencies.
 | ----------- | -------------------------------------- | ------------------------------------------------------- |
 | Embedded    | Application in-process with the engine | Architecturally supported; core is embeddable by design |
 | Sidecar     | SDK → localhost sidecar process        | Planned (Phase 10)                                      |
-| Self-hosted | Customer's authorization cluster       | Planned (Phase 8)                                       |
+| Self-hosted | Customer's authorization cluster       | **Implemented** (Phase 8: image + compose)              |
 | Hosted      | Managed service                        | Planned (Phase 8+); commercial layer                    |
 
 The evaluator's interface-driven design (PolicyStore/RelationshipStore) is what
@@ -52,12 +52,12 @@ See ADR-0005 for package boundaries and rationale.
 
 ## Key component notes
 
-- **Policy compiler** (planned): source → parser → validator → compiler →
+- **Policy compiler** (implemented, Phase 3): source → parser → validator → compiler →
   immutable artifact; enables optimization, static analysis, deterministic
   deployment artifacts.
-- **Relationship store**: interface in core; in-memory implementation first;
-  PostgreSQL adapter is the likely first persistent backend (roadmap Phase 6) —
-  chosen _after_ benchmarking access patterns.
+- **Relationship store**: interface in core; in-memory and PostgreSQL
+  implementations shipped (Phase 6, ADR-0017) — the backend was chosen
+  _after_ benchmarking access patterns.
 - **Caching**: see `caching.md` — all three version-keyed caches are
   implemented (Phase 7, ADR-0021/0022/0023); dependency-tracked scoped
   invalidation remains future work.

@@ -1,7 +1,9 @@
 # Control Plane / Data Plane
 
-Status: **Architectural direction only** (ADR-0007). No distributed
-infrastructure is implemented.
+Status: **Implemented in part** (ADR-0007). The Phase 8 data plane is a
+deployable HTTP service that consumes signed policy artifacts; the control
+plane is the CLI/SDK compile-and-sign pipeline (no hosted control-plane
+service; multi-region replication remains deferred).
 
 ## Control plane
 

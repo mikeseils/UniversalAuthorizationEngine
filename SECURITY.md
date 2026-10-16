@@ -2,25 +2,29 @@
 
 ## Supported status
 
-Phases 0–7 of the roadmap are **implemented** (domain model, in-memory
-evaluator, policy language, CLI, TypeScript SDK, PostgreSQL persistence, and
-the Phase 7 performance work — version-keyed decision, policy, and
-relationship caching plus the profiling, benchmark matrix, and generative
-property tests).
+Phases 0–8 of the roadmap are **implemented** (domain model, in-memory
+evaluator, policy language, CLI, TypeScript SDK, PostgreSQL persistence, the
+Phase 7 performance work, and the Phase 8 production architecture — Ed25519
+policy artifact signing, the HTTP data plane with API-key authentication,
+structured logging and Prometheus metrics, Docker deployment, and the
+disaster-recovery runbook).
 
-The engine is usable **embedded** in a TypeScript/Node application today:
-fail-closed evaluation (ADR-0006), immutable versioned policy artifacts,
-adversarial security tests, and PostgreSQL-backed stores validated against a
-live database in CI. What does **not** yet exist is a deployable
-authorization _service_ — the network data plane, control-plane
-authentication, policy artifact signing, deployment tooling, and
-observability are Phase 8 and unbuilt, and relationship writes are not yet
-authorized mutations (threat model rows 1–2).
+The engine is usable **embedded** in a TypeScript/Node application today and
+as a **self-hosted data-plane service**: fail-closed evaluation (ADR-0006),
+immutable versioned policy artifacts verified by signature at load time
+(ADR-0024), adversarial security tests, PostgreSQL-backed stores validated
+against a live database in CI, and a container image smoke-tested in CI for
+boot, the auth gate, and fail-closed behavior. What does **not** yet exist:
+relationship writes are not yet authorized mutations and the deployed data
+plane has no relationship ingestion path yet (threat model rows 1–2); there
+is no hosted control-plane service (the control plane is the CLI/SDK
+compile-and-sign pipeline); and TLS termination, rate limiting, and API-key
+rotation remain the deployer's responsibility at the service boundary.
 
-Until those land, do **not** use this project as your sole authorization
-layer; embed it only after your own review of the deployment, backup, and
-monitoring responsibilities you inherit. Note also that public API shapes
-outside `@uae/sdk` remain draft
+Do **not** use this project as your sole authorization layer until the open
+items above land; embed it only after your own review of the deployment,
+backup, and monitoring responsibilities you inherit. Note also that public
+API shapes outside `@uae/sdk` remain draft
 (`docs/architecture/api-boundaries.md`), so only the SDK surface carries a
 stability commitment.
 
