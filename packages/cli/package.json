@@ -19,8 +19,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "pnpm --filter @uae/persistence run build && tsc -p tsconfig.json",
-    "typecheck": "pnpm --filter @uae/persistence run build && tsc -p tsconfig.json --noEmit"
+    "build": "pnpm --filter @uae/persistence run build && pnpm --filter @uae/evaluator run build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @uae/persistence run build && pnpm --filter @uae/evaluator run build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@uae/core": "workspace:*",
