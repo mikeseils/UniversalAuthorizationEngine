@@ -66,26 +66,127 @@ describe("DataPlaneServer", () => {
       await server.close();
     }
   });
+  it("requires API key when keys are configured", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, {
+      port: 0,
+      apiKeys: ["secret-key-1"],
+    });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: "user:member_0_0",
+          action: "document.read",
+          resource: "document:doc_0_0_0",
+        }),
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      await server.close();
+    }
+  });
 
-  it("returns 503 for unavailable outcomes", async () => {
+  it("accepts valid Bearer token", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, {
+      port: 0,
+      apiKeys: ["secret-key-1"],
+    });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer secret-key-1",
+        },
+        body: JSON.stringify({
+          subject: "user:member_0_0",
+          action: "document.read",
+          resource: "document:doc_0_0_0",
+        }),
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("accepts valid X-API-Key header", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, {
+      port: 0,
+      apiKeys: ["secret-key-1"],
+    });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": "secret-key-1",
+        },
+        body: JSON.stringify({
+          subject: "user:member_0_0",
+          action: "document.read",
+          resource: "document:doc_0_0_0",
+        }),
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects invalid API key", async () => {
+    const { evaluator } = await setup();
+    const server = new DataPlaneServer(evaluator, {
+      port: 0,
+      apiKeys: ["secret-key-1"],
+    });
+    await server.listen();
+    try {
+      const addr = server.address() as { port: number };
+      const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer wrong-key",
+        },
+        body: JSON.stringify({
+          subject: "user:member_0_0",
+          action: "document.read",
+          resource: "document:doc_0_0_0",
+        }),
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("no auth required when no keys are configured", async () => {
     const { evaluator } = await setup();
     const server = new DataPlaneServer(evaluator, { port: 0 });
     await server.listen();
     try {
       const addr = server.address() as { port: number };
-      // Empty subject → boundary error → unavailable → 503
       const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subject: "",
+          subject: "user:member_0_0",
           action: "document.read",
-          resource: "document:a",
+          resource: "document:doc_0_0_0",
         }),
       });
-      expect(res.status).toBe(503);
-      const body = await res.json();
-      expect((body as { outcome: string }).outcome).toBe("unavailable");
+      expect(res.status).toBe(200);
     } finally {
       await server.close();
     }
@@ -137,3 +238,26 @@ async function setup() {
   });
   return { evaluator };
 }
+
+it("returns 503 for unavailable outcomes", async () => {
+  const { evaluator } = await setup();
+  const server = new DataPlaneServer(evaluator, { port: 0 });
+  await server.listen();
+  try {
+    const addr = server.address() as { port: number };
+    const res = await fetch(`http://127.0.0.1:${String(addr.port)}/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject: "",
+        action: "document.read",
+        resource: "document:a",
+      }),
+    });
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect((body as { outcome: string }).outcome).toBe("unavailable");
+  } finally {
+    await server.close();
+  }
+});

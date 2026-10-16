@@ -9,19 +9,22 @@ import { EvaluatorAdapter, type ClientRequest } from "./evaluator-adapter.js";
  * constant control-plane access. Endpoints:
  *   POST /check     — single authorization check
  *   POST /checkBatch — batch of authorization checks
- *   GET /healthz    — health check
+ *   GET /healthz    — health check (no auth required)
  *   GET /version    — current policy artifact version
  *
  * Fail-closed: store unavailability → 503, never a silent DENY/ALLOW.
+ * API key authentication is required on all endpoints except /healthz.
  */
 export class DataPlaneServer {
   private readonly port: number;
   private readonly adapter: EvaluatorAdapter;
+  private readonly apiKeys: ReadonlySet<string>;
   private server: Server | null = null;
 
-  constructor(evaluator: Evaluator, opts: { port?: number } = {}) {
+  constructor(evaluator: Evaluator, opts: { port?: number; apiKeys?: readonly string[] } = {}) {
     this.port = opts.port ?? 3000;
     this.adapter = new EvaluatorAdapter(evaluator);
+    this.apiKeys = new Set(opts.apiKeys ?? []);
   }
 
   /** Start listening. */
@@ -60,12 +63,35 @@ export class DataPlaneServer {
     return { port: addr.port };
   }
 
+  /**
+   * API key authentication. Accepts `Authorization: Bearer <key>` or
+   * `X-API-Key: <key>`. Returns true when no keys are configured (dev mode)
+   * or when the provided key matches one of the configured keys.
+   */
+  private authenticate(req: import("node:http").IncomingMessage): boolean {
+    if (this.apiKeys.size === 0) return true;
+    const auth = req.headers["authorization"];
+    const key =
+      typeof auth === "string" && auth.startsWith("Bearer ")
+        ? auth.slice(7)
+        : req.headers["x-api-key"];
+    return typeof key === "string" && this.apiKeys.has(key);
+  }
+
   private async handleRequest(
     req: import("node:http").IncomingMessage,
     res: import("node:http").ServerResponse,
   ): Promise<void> {
     const { url, method } = req;
     res.setHeader("Content-Type", "application/json");
+
+    // Health check is unauthenticated (for load balancers).
+    const isHealthz = method === "GET" && url === "/healthz";
+    if (!isHealthz && !this.authenticate(req)) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
 
     try {
       if (method === "GET" && url === "/healthz") {
