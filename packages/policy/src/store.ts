@@ -143,6 +143,32 @@ export class InMemoryPolicyStore implements PolicyStore {
     this.activeVersion = version;
   }
 
+  /**
+   * Load a pre-compiled `VersionedPolicy` directly (data-plane path).
+   *
+   * Unlike `publishPolicy`, this does not recompile or re-hash — the artifact
+   * is stored exactly as provided. Used by the data plane to load signed
+   * artifacts produced by the control plane (ADR-0007, ADR-0024).
+   */
+  loadVersion(versioned: VersionedPolicy): void {
+    if (!isCompiledArtifactShape(versioned.artifact)) {
+      throw new PolicyStoreError("compiled artifact failed structural re-check");
+    }
+    const frozen: VersionedPolicy = Object.freeze({
+      version: versioned.version,
+      hash: versioned.hash,
+      artifact: versioned.artifact,
+      ...(versioned.warnings === undefined ? {} : { warnings: versioned.warnings }),
+      ...(versioned.signature === undefined ? {} : { signature: versioned.signature }),
+      ...(versioned.keyId === undefined ? {} : { keyId: versioned.keyId }),
+      ...(versioned.algorithm === undefined ? {} : { algorithm: versioned.algorithm }),
+    });
+    this.versions.set(frozen.version, frozen);
+    if (this.activeVersion === null) {
+      this.activeVersion = frozen.version;
+    }
+  }
+
   getActiveVersion(): string | null {
     return this.activeVersion;
   }

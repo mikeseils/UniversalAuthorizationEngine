@@ -56,6 +56,21 @@ importers:
 
   packages/core: {}
 
+  packages/data-plane:
+    dependencies:
+      '@uae/core':
+        specifier: workspace:*
+        version: link:../core
+      '@uae/evaluator':
+        specifier: workspace:*
+        version: link:../evaluator
+      '@uae/persistence':
+        specifier: workspace:*
+        version: link:../persistence
+      '@uae/policy':
+        specifier: workspace:*
+        version: link:../policy
+
   packages/evaluator:
     dependencies:
       '@uae/core':
