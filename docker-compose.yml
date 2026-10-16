@@ -11,8 +11,18 @@ services:
       UAE_ARTIFACT_PATH: ${UAE_ARTIFACT_PATH:-}
       UAE_PUBLIC_KEYS_PATH: ${UAE_PUBLIC_KEYS_PATH:-}
       UAE_REQUIRE_SIGNATURE: ${UAE_REQUIRE_SIGNATURE:-false}
+      # Relationship reads come from PostgreSQL; override to point elsewhere,
+      # or set to empty for the (dev-only) in-memory fail-closed store.
+      UAE_PG_URL: ${UAE_PG_URL:-postgres://authz:authz_password@postgres:5432/authz}
+      UAE_RUN_MIGRATIONS: ${UAE_RUN_MIGRATIONS:-true}
+      # Request limits: body cap (bytes) and per-key/IP rate limit (0 = off).
+      UAE_MAX_BODY_BYTES: ${UAE_MAX_BODY_BYTES:-1048576}
+      UAE_RATE_LIMIT_PER_MINUTE: ${UAE_RATE_LIMIT_PER_MINUTE:-0}
     # volumes:
     #   - ./artifact:/app/artifact:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/healthz"]
       interval: 30s
@@ -20,3 +30,22 @@ services:
       retries: 3
       start_period: 5s
     restart: unless-stopped
+
+  postgres:
+    # Dev defaults below — override via .env for anything beyond a local try-out.
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-authz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authz_password}
+      POSTGRES_DB: ${POSTGRES_DB:-authz}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-authz} -d ${POSTGRES_DB:-authz}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:
