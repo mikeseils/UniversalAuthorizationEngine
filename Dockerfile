@@ -4,6 +4,9 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Every packages/*/tsconfig.json extends ../../tsconfig.json — without this the
+# in-image `pnpm run build` fails with TS5083.
+COPY tsconfig.json ./
 COPY packages ./packages
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     corepack enable && pnpm install --frozen-lockfile && pnpm run build

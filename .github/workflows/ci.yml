@@ -54,3 +54,41 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build data-plane image
+        run: docker build -t uae-data-plane .
+
+      - name: Smoke test image (boot, auth gate, fail-closed empty store)
+        run: |
+          docker run -d --name data-plane -p 3000:3000 -e UAE_API_KEYS=ci-smoke-key uae-data-plane
+          healthy=""
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/healthz >/dev/null; then healthy=1; break; fi
+            sleep 1
+          done
+          if [ -z "$healthy" ]; then
+            echo "::error::data plane never became healthy"
+            docker logs data-plane
+            exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3000/check \
+            -H 'content-type: application/json' -d '{}')
+          if [ "$code" != "401" ]; then
+            echo "::error::expected 401 without API key, got $code"
+            docker logs data-plane
+            exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3000/check \
+            -H 'content-type: application/json' -H 'x-api-key: ci-smoke-key' \
+            -d '{"subject":"user:a","action":"x.read","resource":"doc:1"}')
+          if [ "$code" != "503" ]; then
+            echo "::error::expected 503 fail-closed on empty store, got $code"
+            docker logs data-plane
+            exit 1
+          fi
+          docker rm -f data-plane

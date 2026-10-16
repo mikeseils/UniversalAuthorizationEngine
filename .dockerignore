@@ -1,0 +1,25 @@
+# Build-context hygiene: the image build needs only the workspace manifests,
+# the root tsconfig, and package sources (see Dockerfile).
+node_modules
+**/node_modules
+.git
+.github
+.vscode
+.idea
+coverage
+**/dist
+**/*.tsbuildinfo
+.env
+.env.*
+*.pem
+*.key
+*.log
+logs
+.cache
+.eslintcache
+docs
+tests
+examples
+scripts
+docker-compose.yml
+.dockerignore
