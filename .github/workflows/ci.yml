@@ -46,14 +46,14 @@ jobs:
       - name: Format check
         run: pnpm format:check
 
+      - name: Build
+        run: pnpm build
+
       - name: Test
         run: pnpm test
         env:
           AUTHZ_TEST_PG_URL: postgres://authz:authz_password@localhost:5432/authz_test
           AUTHZ_REQUIRE_PG_TESTS: "1"
-
-      - name: Build
-        run: pnpm build
 
   docker:
     runs-on: ubuntu-latest

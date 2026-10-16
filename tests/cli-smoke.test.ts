@@ -29,10 +29,13 @@ function parent(): string {
 beforeAll(() => {
   if (!existsSync(MAIN)) {
     // Build on demand rather than skipping: a skipped test is a silent gap, and
-    // `pnpm test` on a fresh clone should still verify the binary.
+    // `pnpm test` on a fresh clone should still verify the binary. The generous
+    // timeout covers a cold `pnpm --filter @uae/cli run build` chain (core →
+    // policy → persistence/evaluator → cli) on a loaded runner, especially when
+    // sibling suites are building concurrently.
     execSync("pnpm --filter @uae/cli run build", { cwd: REPO_ROOT, stdio: "pipe" });
   }
-});
+}, 120_000);
 
 afterAll(() => {
   for (const dir of dirs) removeDir(dir);
