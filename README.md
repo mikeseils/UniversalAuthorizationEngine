@@ -1,5 +1,8 @@
 # Universal Authorization Engine
 
+[![CI](https://github.com/mikeseils/UniversalAuthorizationEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/mikeseils/UniversalAuthorizationEngine/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+
 A developer-friendly authorization engine: a reusable infrastructure primitive
 that answers one question —
 
@@ -62,66 +65,10 @@ if (!result.decision.allowed) {
 }
 ```
 
-## Implementation status
-
-| Area                                                            | Status                         |
-| --------------------------------------------------------------- | ------------------------------ |
-| Repository, tooling, CI, documentation                          | **Implemented**                |
-| Domain model & core types (`@uae/core`)                         | **Implemented** (draft shapes) |
-| Structured policy + versioned store (`@uae/policy`)             | **Implemented** (draft shapes) |
-| In-memory evaluator + explanations (`@uae/evaluator`)           | **Implemented** (draft shapes) |
-| Policy language v1, parser, AST, compiler (`@uae/policy`)       | **Implemented** (v1 subset)    |
-| CLI (`authz validate/test/check/init`)                          | **Implemented** (Phase 4)      |
-| SDK (`@uae/sdk`: `check`, `checkBatch`, decision/unavailable)   | **Implemented** (Phase 5)      |
-| PostgreSQL stores (`@uae/persistence`) + store contract         | **Implemented** (Phase 6)      |
-| Caching (decision/policy/relationship, version-keyed)           | **Implemented** (Phase 7)      |
-| Data plane service (`@uae/data-plane`: HTTP, API keys, metrics) | **Implemented** (Phase 8)      |
-| Deployment (Docker, compose, disaster recovery)                 | **Implemented** (Phase 8)      |
-| Hosted service (managed)                                        | Planned (Phase 8+)             |
-
-No feature is claimed as implemented above unless it exists in this
-repository. Full detail: `docs/development/roadmap.md`.
-
-## Implemented path (today)
-
-```ts
-import { InMemoryPolicyStore } from "@uae/policy";
-import { Evaluator, InMemoryRelationshipStore } from "@uae/evaluator";
-
-// 1. Author policy in the language v1 (see examples/acme/policy.authz)
-//    and publish it — text is parsed, lowered, validated, and compiled into an
-//    immutable, content-hashed, versioned artifact.
-const policyStore = new InMemoryPolicyStore();
-const published = await policyStore.publishPolicy({ source: policyText, format: "text" });
-// Activation is explicit and always awaited: publishing never deploys, and a
-// persistent store's activation is asynchronous (ADR-0018 S7).
-await policyStore.setActiveVersion(published.version);
-
-// 2. Supply relationships through the store interface (in-memory today).
-const relationships = new InMemoryRelationshipStore();
-relationships.add({ subject: "user:alice", relation: "owner", resource: "project:alpha" });
-
-// 3. Evaluate deterministically, fail closed.
-const evaluator = new Evaluator({
-  policyStore,
-  relationshipStore: relationships.asRelationshipStore(),
-});
-const decision = await evaluator.check({
-  subject: "user:alice",
-  action: "document.read",
-  resource: "document:a",
-});
-// → { allowed: true, reason: "policy_allow", policyVersion: "1" }
-```
-
-An explanation can be requested per check
-(`evaluator.check(req, { explanation: "standard" })`), and `checkBatch` evaluates
-many requests with per-item fail-closed results.
-
 ## SDK (`@uae/sdk`)
 
-Applications should not wire up stores and the evaluator themselves. The SDK is
-the supported client surface:
+The SDK is the supported client surface — applications should not wire up
+stores and the evaluator themselves.
 
 ```ts
 // A denial and an engine outage are different things, and stay different things.
@@ -134,11 +81,89 @@ const outcomes = await authz.checkBatch([req1, req2, req3]);
 // 1:1 with the input; one unavailable item never invalidates its siblings.
 ```
 
-Wrap an existing `Evaluator` with `AuthzClient.fromEvaluator(evaluator)`, or
-construct a ready-to-use client with `AuthzClient.inMemory({ policy, relationships })`.
+Three ways to construct a client (design: ADR-0015, ADR-0016):
+
+| Constructor                                       | Use when                                       |
+| ------------------------------------------------- | ---------------------------------------------- |
+| `AuthzClient.inMemory({ policy, relationships })` | Prototyping and tests — nothing else to run    |
+| `AuthzClient.fromEvaluator(evaluator)`            | The engine is already embedded in your process |
+| `AuthzClient.fromTransport(baseUrl)`              | A deployed data plane answers over HTTP        |
+
 Transports are pluggable (`ClientTransport`), so the same client code works
-in-process or against a deployed data plane over HTTP (`HttpTransport`).
-Design: ADR-0015, ADR-0016.
+in-process or against a remote data plane. An in-process check can also
+return an **explanation** of how the decision was reached — pass
+`{ explanation: "minimal" | "standard" | "debug" }`; disclosure levels are
+deliberate (see `docs/design/explanations.md`).
+
+## CLI (`authz`)
+
+For policy authors working locally (ADR-0013, ADR-0014):
+
+| Command          | Purpose                                     |
+| ---------------- | ------------------------------------------- |
+| `authz init`     | Scaffold a starter policy and policy tests  |
+| `authz validate` | Syntax + schema verification of a policy    |
+| `authz test`     | Run declarative assertions against a policy |
+| `authz check`    | One-off evaluation from the terminal        |
+
+See `examples/acme/` for the canonical policy, its relationships, and its
+tests, and `docs/design/policy-language.md` for the language itself.
+
+## Run the service (data plane)
+
+The data plane is an independently deployable HTTP node: it loads a compiled
+(Ed25519-signed) policy artifact, reads relationships from PostgreSQL, and
+answers checks with API-key authentication, structured logs, and Prometheus
+metrics — without contacting a control plane at runtime (ADR-0007, ADR-0024).
+
+```sh
+git clone https://github.com/mikeseils/UniversalAuthorizationEngine.git
+cd UniversalAuthorizationEngine
+docker compose up --build           # data plane + PostgreSQL (health-gated)
+curl http://localhost:3000/healthz  # → {"status":"ok"}
+```
+
+| Endpoint           | Auth    | Purpose                               |
+| ------------------ | ------- | ------------------------------------- |
+| `POST /check`      | API key | Single authorization check            |
+| `POST /checkBatch` | API key | Batch of checks with per-item results |
+| `GET /version`     | API key | Active policy version (503 when none) |
+| `GET /healthz`     | —       | Liveness probe                        |
+| `GET /metrics`     | —       | Prometheus metrics                    |
+
+Checks fail closed with **503** until you configure a policy artifact, and
+always: missing/invalid key → **401**, malformed JSON → **400**, oversized
+body → **413**, rate exceeded → **429**, unreachable store → **503**.
+
+Configuration is environment-only (`UAE_API_KEYS`, `UAE_ARTIFACT_PATH`,
+`UAE_PG_URL`, limits, signature enforcement) — see `.env.example` and
+`docs/operations/deployment.md` for the full reference plus edge
+responsibilities (TLS, key rotation, metrics scraping). CI publishes the
+container image on every push to `main`, and
+`docs/operations/disaster-recovery.md` covers backup, restore, and key
+compromise.
+
+## Documentation
+
+| Where                                  | What                                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------ |
+| `docs/design/`                         | Product vision, domain/authorization/evaluation model, policy language, explanations |
+| `docs/architecture/`                   | Overview, control/data plane, storage, caching, failure modes, scaling               |
+| `docs/adr/`                            | Architecture decision records — the reasoning behind every major choice              |
+| `docs/operations/deployment.md`        | Running the data plane: configuration, edge responsibilities                         |
+| `docs/operations/disaster-recovery.md` | Backup, restore, key compromise, fail-closed recovery                                |
+| `docs/security/`                       | Threat model and security principles                                                 |
+| `docs/development/roadmap.md`          | Phase-by-phase implementation status and what comes next                             |
+| `SECURITY.md`                          | Supported status and vulnerability reporting                                         |
+
+## Security considerations
+
+- **Default deny**: unknown or errored evaluation is always DENY — never a
+  silent allow. Denial is distinct from infrastructure failure.
+- Tenant isolation, bounded traversal, and explicit failure modes are core
+  properties, tested adversarially.
+- See `docs/security/threat-model.md` and `docs/security/security-principles.md`.
+  To report a vulnerability, see `SECURITY.md`.
 
 ## Development setup
 
@@ -163,6 +188,7 @@ More: `docs/development/local-development.md`.
 │   ├── architecture/      Overview, control/data plane, storage, caching, failure modes
 │   ├── design/            Vision, domain model, authorization model, evaluation, explanations
 │   ├── development/       Roadmap, local development, testing strategy
+│   ├── operations/        Deployment and disaster recovery runbooks
 │   └── security/          Threat model, security principles
 ├── packages/
 │   ├── core/              Domain types + store interfaces (zero dependencies)
@@ -170,20 +196,12 @@ More: `docs/development/local-development.md`.
 │   ├── evaluator/         Deterministic evaluator + explanations
 │   ├── sdk/               TypeScript SDK: stable client API, decision/unavailable outcomes
 │   ├── cli/               authz CLI: init, validate, test, check
-│   └── persistence/       PostgreSQL relationship + policy stores, SQL migrations
+│   ├── persistence/       PostgreSQL relationship + policy stores, SQL migrations
+│   └── data-plane/        Data-plane HTTP service: artifact loader, server, entrypoint
 ├── examples/acme/         Canonical example domain (policy, relationships, tests)
 ├── scripts/bench.mjs      Access-pattern benchmark (pnpm bench)
 └── tests/                 Engine, CLI, SDK, persistence, conformance, and security suites
 ```
-
-## Security considerations
-
-- **Default deny**: unknown or errored evaluation is always DENY — never a
-  silent allow. Denial is distinct from infrastructure failure.
-- Tenant isolation, bounded traversal, and explicit failure modes are core
-  properties, tested adversarially.
-- See `docs/security/threat-model.md` and `docs/security/security-principles.md`.
-  To report a vulnerability, see `SECURITY.md`.
 
 ## Contributing
 
