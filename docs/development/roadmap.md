@@ -199,7 +199,7 @@ Schema, indexes, error taxonomy, and the idempotency guarantee are documented in
 ## Phase 8 — Production architecture ✅ Implemented
 
 The deployable authorization **service** exists end to end (ADR-0007,
-ADR-0016, ADR-0024), delivered as six workstreams:
+ADR-0016, ADR-0024), delivered as six workstreams plus closing follow-ups:
 
 - **WS-1 — policy artifact signing (ADR-0024).** Compiled artifacts are
   signed with Ed25519 over the canonical JSON of `{ artifact, hash }`
@@ -233,11 +233,16 @@ ADR-0016, ADR-0024), delivered as six workstreams:
 
 The control plane remains the CLI/SDK compile-and-sign pipeline handing
 immutable artifacts to data planes — a hosted control-plane service and
-multi-region replication stay deferred (ADR-0007). Open Phase 8 follow-ups:
-relationship ingestion into the deployed data plane (threat model rows 1–2),
-HTTP boundary hardening (400 on malformed JSON, body-size cap, `/version`),
-and service-boundary hardening (rate limiting, non-root image, metrics
-hygiene).
+multi-region replication stay deferred (ADR-0007). The phase's closing
+follow-ups are done, too: relationship ingestion (`UAE_PG_URL` wiring with
+startup migrations and fail-fast connectivity, proven end-to-end against
+PostgreSQL in CI), HTTP boundary hardening (400 on malformed JSON, a 413
+body cap, a real `/version`, health probes excluded from check metrics), and
+service-boundary hardening (opt-in rate limiting with
+`uae_rate_limited_total`, a non-root container image, GHCR image publishing,
+and `docs/operations/deployment.md` for the deployer's edge
+responsibilities). An HTTP relationship-write API with authorization
+remains deferred (Phase 10+).
 
 ## Phase 9 — Enterprise features 🔜 Planned
 

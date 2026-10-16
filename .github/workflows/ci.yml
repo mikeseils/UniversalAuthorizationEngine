@@ -91,4 +91,36 @@ jobs:
             docker logs data-plane
             exit 1
           fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/version \
+            -H 'x-api-key: ci-smoke-key')
+          if [ "$code" != "503" ]; then
+            echo "::error::expected 503 from /version with no active policy, got $code"
+            docker logs data-plane
+            exit 1
+          fi
           docker rm -f data-plane
+
+  publish:
+    # Ship the smoke-tested image to GHCR on main only; PRs build without pushing.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push data-plane image
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/data-plane"
+          docker build -t "$image:${{ github.sha }}" -t "$image:main" .
+          docker push "$image:${{ github.sha }}"
+          docker push "$image:main"

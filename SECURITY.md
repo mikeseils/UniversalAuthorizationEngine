@@ -12,14 +12,16 @@ disaster-recovery runbook).
 The engine is usable **embedded** in a TypeScript/Node application today and
 as a **self-hosted data-plane service**: fail-closed evaluation (ADR-0006),
 immutable versioned policy artifacts verified by signature at load time
-(ADR-0024), adversarial security tests, PostgreSQL-backed stores validated
-against a live database in CI, and a container image smoke-tested in CI for
-boot, the auth gate, and fail-closed behavior. What does **not** yet exist:
-relationship writes are not yet authorized mutations and the deployed data
-plane has no relationship ingestion path yet (threat model rows 1–2); there
-is no hosted control-plane service (the control plane is the CLI/SDK
-compile-and-sign pipeline); and TLS termination, rate limiting, and API-key
-rotation remain the deployer's responsibility at the service boundary.
+(ADR-0024), PostgreSQL-backed relationship reads in the deployed data plane
+(`UAE_PG_URL`), request limits (body cap, opt-in rate limiting), a container
+image smoke-tested in CI for boot, the auth gate, and fail-closed behavior,
+and adversarial security tests. What does **not** yet exist: relationship
+writes are not yet authorized mutations — there is no write API; mutations
+are operator actions against the authenticated database (threat model rows
+1–2) — and there is no hosted control-plane service (the control plane is
+the CLI/SDK compile-and-sign pipeline). TLS termination and API-key rotation
+remain deployer responsibilities, documented in
+`docs/operations/deployment.md`.
 
 Do **not** use this project as your sole authorization layer until the open
 items above land; embed it only after your own review of the deployment,

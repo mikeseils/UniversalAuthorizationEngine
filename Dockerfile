@@ -24,4 +24,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages ./packages
 ENV PORT=3000
 EXPOSE 3000
+# Non-root: the process only reads the app tree and answers on the network.
+USER node
 CMD ["node", "packages/data-plane/bin/start.js"]

@@ -157,7 +157,7 @@ More: `docs/development/local-development.md`.
 ## Repository structure
 
 ```
-├── .github/workflows/     CI (install → typecheck → lint → format → test → build → docker)
+├── .github/workflows/     CI (install → typecheck → lint → format → test → build → docker → publish)
 ├── docs/
 │   ├── adr/               Architecture decision records
 │   ├── architecture/      Overview, control/data plane, storage, caching, failure modes
