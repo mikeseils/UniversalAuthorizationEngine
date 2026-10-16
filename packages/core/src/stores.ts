@@ -19,6 +19,16 @@ export interface VersionedPolicy {
    * whether a policy was accepted.
    */
   readonly warnings?: readonly string[];
+  /**
+   * Cryptographic signature of `canonicalJson({ artifact, hash })` (base64url,
+   * no padding), present when the policy was published with a signing key.
+   * Absent for unsigned artifacts (ADR-0024).
+   */
+  readonly signature?: string;
+  /** Key identifier (kid) used to verify `signature` (ADR-0024). */
+  readonly keyId?: string;
+  /** Signing algorithm used to produce `signature` (ADR-0024). */
+  readonly algorithm?: string;
 }
 
 /**

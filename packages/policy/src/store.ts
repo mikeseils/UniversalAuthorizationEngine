@@ -5,6 +5,7 @@ import { PolicySyntaxError } from "./lexer.js";
 import { compilePolicySource } from "./source.js";
 import { StructuredPolicy } from "./structured-policy.js";
 import { PolicyValidationError, validateStructuredPolicy } from "./validate.js";
+import { signArtifact } from "./signing.js";
 
 /** Typed infrastructure error (distinct from a DENY — ADR-0010). */
 export class PolicyStoreError extends Error {
@@ -16,6 +17,20 @@ export class PolicyStoreError extends Error {
 
 function policyError(message: string): PolicyStoreError {
   return new PolicyStoreError(message);
+}
+
+/**
+ * Optional publishing options for `InMemoryPolicyStore.publishPolicy`.
+ * When `signingKey` is provided, the published artifact is signed (ADR-0024)
+ * and the returned `VersionedPolicy` carries `signature`, `keyId`, and
+ * `algorithm`. When absent, publishing is unchanged and produces an unsigned
+ * artifact (the development default).
+ */
+export interface PublishOptions {
+  /** PEM-encoded Ed25519 private key (PKCS#8). */
+  readonly signingKey?: string;
+  /** Key identifier (kid) used to verify the signature; defaults to `"default"`. */
+  readonly keyId?: string;
 }
 
 interface PublishablePolicy extends CompiledPolicy {
@@ -89,7 +104,7 @@ export class InMemoryPolicyStore implements PolicyStore {
     return Promise.resolve(this.versions.get(version) ?? null);
   }
 
-  publishPolicy(policy: PolicySource): Promise<VersionedPolicy> {
+  publishPolicy(policy: PolicySource, options: PublishOptions = {}): Promise<VersionedPolicy> {
     let resolved: PublishablePolicy;
     try {
       resolved = resolvePolicy(policy);
@@ -106,6 +121,15 @@ export class InMemoryPolicyStore implements PolicyStore {
       hash: resolved.hash,
       artifact: resolved.artifact,
       ...(resolved.warnings.length === 0 ? {} : { warnings: resolved.warnings }),
+      ...(options.signingKey === undefined
+        ? {}
+        : {
+            signature: signArtifact(resolved.artifact, resolved.hash, options.signingKey, {
+              ...(options.keyId === undefined ? {} : { keyId: options.keyId }),
+            }).signature,
+            keyId: options.keyId ?? "default",
+            algorithm: "ed25519" as const,
+          }),
     });
     this.versions.set(version, versioned);
     return Promise.resolve(versioned);

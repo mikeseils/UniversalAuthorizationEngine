@@ -24,7 +24,14 @@ export { validateStructuredPolicy } from "./validate.js";
 export type { PolicyValidationResult } from "./validate.js";
 export { canonicalJson, compileStructuredPolicy, isCompiledArtifactShape } from "./compile.js";
 export type { CompiledPolicy, CompiledPolicyArtifact } from "./compile.js";
-export { InMemoryPolicyStore, PolicyStoreError } from "./store.js";
+export {
+  generateSigningKeyPair,
+  signArtifact,
+  type SigningAlgorithm,
+  type SignedArtifactMetadata,
+  verifyArtifact,
+} from "./signing.js";
+export { InMemoryPolicyStore, PolicyStoreError, type PublishOptions } from "./store.js";
 // policy language (ADR-0012)
 export { MAX_SOURCE_LENGTH, PolicySyntaxError, tokenize } from "./lexer.js";
 export type { Token, TokenType } from "./lexer.js";
