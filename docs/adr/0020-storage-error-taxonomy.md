@@ -139,7 +139,7 @@ the contract rather than an implementation detail:
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------- |
 | `42P01`, `42703`                                                                                                                                                                        | `schema_missing` | `PersistenceError`      |
 | `57014` (server `statement_timeout`), `ETIMEDOUT`, message matching `/timeout/i`                                                                                                        | `timeout`        | `StoreTimeoutError`     |
-| `ECONNREFUSED`, `ECONNRESET`, `EPIPE`, `ENOTFOUND`, `EHOSTUNREACH`, `ENETUNREACH`, `57P01`, SQLSTATE `08xxx`, or message matching `/connection.*(terminated\|closed\|ended\|refused)/i` | `unavailable`    | `StoreUnavailableError` |
+| `ECONNREFUSED`, `ECONNRESET`, `EPIPE`, `ENOTFOUND`, `EHOSTUNREACH`, `ENETUNREACH`, `57P01`, SQLSTATE `08xxx`, or message containing `connection` followed by `terminated`, `closed`, `ended`, or `refused` | `unavailable` | `StoreUnavailableError` |
 | everything else                                                                                                                                                                         | `query_failed`   | `PersistenceError`      |
 
 Three properties of this table are load-bearing:

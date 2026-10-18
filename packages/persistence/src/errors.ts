@@ -106,7 +106,8 @@ export function persistenceError(operation: string, error: unknown): Persistence
     code === "08006" ||
     code === "08001" ||
     code === "57P01" ||
-    /connection.*(terminated|closed|ended|refused)/i.test(message)
+    (message.toLowerCase().includes("connection") &&
+      /terminated|closed|ended|refused/i.test(message))
   ) {
     return new StoreUnavailableError(detail, options);
   }

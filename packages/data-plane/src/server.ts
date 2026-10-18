@@ -322,7 +322,11 @@ export class DataPlaneServer {
       res.writeHead(status);
       res.end(
         JSON.stringify({
-          error: error instanceof Error ? error.message : String(error),
+          // Only surface caller-facing messages from RequestError (400/413).
+          // Unexpected internal failures (500) return a generic message to avoid
+          // leaking stack traces or internal details to the client; the real
+          // error is already recorded server-side via this.log().
+          error: error instanceof RequestError ? error.message : "internal server error",
         }),
       );
       const op = url === "/checkBatch" ? "checkBatch" : url === "/version" ? "version" : "check";
