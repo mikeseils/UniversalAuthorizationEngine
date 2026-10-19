@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { coerceIdentifier, parseAction, ValidationError } from "@uae/core";
 import { Evaluator } from "@uae/evaluator";
 import { EvaluatorAdapter, type ClientRequest } from "./evaluator-adapter.js";
 
@@ -270,7 +271,7 @@ export class DataPlaneServer {
         return;
       }
       if (method === "POST" && url === "/check") {
-        const body = (await readJsonBody(req, this.maxBodyBytes)) as ClientRequest;
+        const body = assertCheckRequest(await readJsonBody(req, this.maxBodyBytes));
         const outcome = await this.adapter.check(body);
         const status = outcome.outcome === "unavailable" ? 503 : 200;
         res.writeHead(status);
@@ -290,13 +291,17 @@ export class DataPlaneServer {
         return;
       }
       if (method === "POST" && url === "/checkBatch") {
-        const body = await readJsonBody(req, this.maxBodyBytes);
-        if (!Array.isArray(body)) {
+        const raw = await readJsonBody(req, this.maxBodyBytes);
+        if (!Array.isArray(raw)) {
           res.writeHead(400);
           res.end(JSON.stringify({ error: "request body must be an array" }));
           return;
         }
-        const outcomes = await this.adapter.checkBatch(body as ClientRequest[]);
+        const requests: ClientRequest[] = [];
+        for (const item of raw) {
+          requests.push(assertCheckRequest(item));
+        }
+        const outcomes = await this.adapter.checkBatch(requests);
         const status = outcomes.some((o) => o.outcome === "unavailable") ? 503 : 200;
         res.writeHead(status);
         res.end(JSON.stringify(outcomes));
@@ -384,6 +389,38 @@ class RequestError extends Error {
     this.status = status;
     this.name = "RequestError";
   }
+}
+
+/** Validate a caller-supplied check request at the boundary. Malformed caller
+ * input (subject/action/resource/context) is rejected with 400, never coerced
+ * or silently evaluated; genuine store/evaluator failures still surface as 503
+ * from the adapter. */
+function assertCheckRequest(body: unknown): ClientRequest {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new RequestError(400, "request body must be a JSON object");
+  }
+  const req = body as Record<string, unknown>;
+  try {
+    coerceIdentifier(req.subject, "subject");
+    parseAction(req.action);
+    coerceIdentifier(req.resource, "resource");
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw new RequestError(400, error.message);
+    }
+    throw error;
+  }
+  if (req.context !== undefined) {
+    if (typeof req.context !== "object" || req.context === null || Array.isArray(req.context)) {
+      throw new RequestError(400, "context must be a JSON object");
+    }
+    for (const [key, value] of Object.entries(req.context)) {
+      if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+        throw new RequestError(400, `context key "${key}" must be a string, number, or boolean`);
+      }
+    }
+  }
+  return req as ClientRequest;
 }
 
 async function readJsonBody(
