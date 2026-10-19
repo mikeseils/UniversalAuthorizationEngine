@@ -506,7 +506,7 @@ describe("PostgresPolicyStore", () => {
     // a second statement. Without it a reset store is not indistinguishable
     // from a freshly migrated one (versions keep climbing across resets).
     expect(calls.map((call) => call.sql)).toEqual([
-      "TRUNCATE policy_deployments, policies RESTART IDENTITY",
+      "TRUNCATE policy_governance, policy_deployments, policies RESTART IDENTITY",
       "ALTER SEQUENCE policy_versions RESTART WITH 1",
     ]);
   });

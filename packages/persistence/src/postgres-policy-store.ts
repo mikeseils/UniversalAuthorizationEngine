@@ -157,8 +157,10 @@ export class PostgresPolicyStore implements PolicyStore {
    * pointer, leaving the store indistinguishable from a freshly migrated one —
    * the same guarantee `InMemoryPolicyStore.reset()` makes.
    *
-   * `policy_deployments` references `policies`, so both tables truncate in one
-   * statement. `RESTART IDENTITY` is not sufficient for version allocation: it
+   * `policy_deployments` and `policy_governance` both reference `policies`, so
+   * all three truncate in one statement: Postgres refuses to truncate a table
+   * any foreign key points at unless the referencing table truncates with it.
+   * `RESTART IDENTITY` is not sufficient for version allocation: it
    * restarts only sequences *owned* by the truncated tables, and
    * `policy_versions` is standalone (measured on PostgreSQL 18 — the
    * truncate leaves its `last_value` untouched). It is restarted explicitly, so
@@ -170,7 +172,9 @@ export class PostgresPolicyStore implements PolicyStore {
    */
   async reset(): Promise<void> {
     try {
-      await this.db.query("TRUNCATE policy_deployments, policies RESTART IDENTITY");
+      await this.db.query(
+        "TRUNCATE policy_governance, policy_deployments, policies RESTART IDENTITY",
+      );
       await this.db.query("ALTER SEQUENCE policy_versions RESTART WITH 1");
       this.compiler = new InMemoryPolicyStore();
     } catch (error) {

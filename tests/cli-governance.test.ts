@@ -67,7 +67,7 @@ const V2_POLICY = [
   "  relation admin: user",
   "  relation member: user",
   "  permission manage = admin",
-  "  permission read = anyOf(admin, member)",
+  "  permission read = admin or member",
   "}",
   "",
 ].join("\n");
