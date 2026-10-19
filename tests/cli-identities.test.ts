@@ -97,7 +97,7 @@ describe("identities import (Phase 9 SCIM)", () => {
   });
 
   it.skipIf(PG_URL === undefined)(
-    "imports idempotent mappedTo edges and records a provisioning act",
+    "imports idempotent mapped_to edges and records a provisioning act",
     async () => {
       const fs = await import("node:fs");
       fs.writeFileSync(MAPPING_FILE, MAPPING_CONTENT, "utf8");

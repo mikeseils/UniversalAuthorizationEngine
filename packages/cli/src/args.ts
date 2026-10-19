@@ -222,7 +222,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "identities import",
     summary:
-      "Import SCIM identity mappings (externalId -> subject ID) as idempotent mappedTo edges (Phase 9)",
+      "Import SCIM identity mappings (externalId -> subject ID) as idempotent mapped_to edges (Phase 9)",
     usage:
       "authz identities import <mappingFile> [--store postgres] [--environment env] [--actor name] [--json]",
     flags: [

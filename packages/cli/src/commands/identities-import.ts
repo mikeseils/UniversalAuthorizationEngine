@@ -14,7 +14,7 @@ import {
 /** `authz identities import <mappingFile>` (Phase 9 SCIM provisioning mapping).
  *
  * Reads a SCIM-style identity mapping (externalId -> opaque subject ID) and
- * provisions it into the relationship store as idempotent `mappedTo` edges
+ * provisions it into the relationship store as idempotent `mapped_to` edges
  * from `scim:<externalId>` to the target subject. The engine stores **no user
  * directory, no PII, no passwords** — only opaque subject IDs. The mapping is
  * external identity -> subject ID; policies and relationships evaluate the
@@ -97,7 +97,8 @@ export async function runIdentitiesImport(command: ParsedCommand, io: CliIo): Pr
     await runMigrations(db);
     const relationships = mappings.map((m) => ({
       subject: { type: "scim", id: m.externalId },
-      relation: "mappedTo",
+      // Relation names pass the core write boundary: [a-z][a-z0-9_]* — snake_case.
+      relation: "mapped_to",
       resource: { type: m.subject.split(":")[0], id: m.subject.split(":")[1] },
     }));
     const writer = new PostgresRelationshipWriter(db);
