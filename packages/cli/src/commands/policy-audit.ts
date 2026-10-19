@@ -43,7 +43,7 @@ export async function runPolicyAudit(command: ParsedCommand, io: CliIo): Promise
       }
       for (const row of result.rows) {
         con.line(
-          `  ${String(row.id).padEnd(4)} ${row.action.padEnd(9)} ${row.version}  ${row.actor}  ${row.created_at}`,
+          `  ${String(row.id).padEnd(4)} ${row.action.padEnd(9)} ${row.version}  ${row.actor}  ${row.created_at.toISOString()}`,
         );
       }
     }

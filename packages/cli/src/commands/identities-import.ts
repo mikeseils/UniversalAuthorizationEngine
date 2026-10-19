@@ -43,7 +43,7 @@ export async function runIdentitiesImport(command: ParsedCommand, io: CliIo): Pr
   let text: string;
   try {
     text = fs.readFileSync(mappingFile, "utf8");
-  } catch (error) {
+  } catch {
     throw new CliError(`cannot read mapping file ${mappingFile}`, EXIT.usage);
   }
 
@@ -56,7 +56,7 @@ export async function runIdentitiesImport(command: ParsedCommand, io: CliIo): Pr
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
-    } catch (error) {
+    } catch {
       throw new CliError(`${mappingFile}:${String(lineNumber)}: not valid JSON`, EXIT.validation);
     }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -101,6 +101,7 @@ export async function runIdentitiesImport(command: ParsedCommand, io: CliIo): Pr
       resource: { type: m.subject.split(":")[0], id: m.subject.split(":")[1] },
     }));
     const writer = new PostgresRelationshipWriter(db);
+    // addBatch returns only newly-inserted edges; a re-import returns none.
     const inserted = await writer.addBatch(relationships);
     // Record the provisioning act in the governance audit trail.
     await db.query(
@@ -117,7 +118,7 @@ export async function runIdentitiesImport(command: ParsedCommand, io: CliIo): Pr
       });
     } else {
       con.line(
-        `imported ${String(mappings.length)} SCIM identity mapping(s) (environment ${environment}, actor ${actor}), ${String(inserted)} new edge(s)`,
+        `imported ${String(mappings.length)} SCIM identity mapping(s) (environment ${environment}, actor ${actor}), ${String(inserted.length)} new edge(s)`,
       );
     }
     return EXIT.ok;

@@ -227,12 +227,16 @@ export class PostgresRelationshipWriter {
    *
    * If any relationship fails validation or insertion, the entire batch is
    * rolled back, ensuring atomic all-or-nothing writes (ADR-0018 S2/S5).
+   *
+   * Returns only the relationships that were **newly inserted**: rows that
+   * already existed (`ON CONFLICT ... DO NOTHING`) are omitted, so callers can
+   * report how many edges an idempotent re-run actually created.
    */
   async addBatch(inputs: readonly unknown[]): Promise<readonly Relationship[]> {
     const relationships = inputs.map((input) => parseRelationship(input));
     try {
       return await this.db.transaction("READ COMMITTED", async (tx) => {
-        let inserted = 0;
+        const newlyInserted: Relationship[] = [];
         for (const rel of relationships) {
           const result = await tx.query(
             `INSERT INTO relationships (subject_type, subject_id, relation, resource_type, resource_id)
@@ -241,14 +245,16 @@ export class PostgresRelationshipWriter {
              RETURNING true AS inserted`,
             [rel.subject.type, rel.subject.id, rel.relation, rel.resource.type, rel.resource.id],
           );
-          inserted += result.rows.length;
+          if (result.rows.length > 0) {
+            newlyInserted.push(rel);
+          }
         }
         // One bump per batch, not per row: the version marks *that* something
         // changed, not how much changed, and the whole batch commits atomically.
-        if (inserted > 0) {
+        if (newlyInserted.length > 0) {
           await tx.query("SELECT nextval('relationship_state_version')");
         }
-        return Object.freeze([...relationships]);
+        return Object.freeze(newlyInserted);
       });
     } catch (error) {
       throw persistenceError("addBatch", error);

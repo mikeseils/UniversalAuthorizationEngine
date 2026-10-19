@@ -120,7 +120,8 @@ describe("identities import (Phase 9 SCIM)", () => {
           AUTHZ_DATABASE_URL: baseUrl,
         });
         expect(audit.code).toBe(EXIT.ok);
-        const events = JSON.parse(audit.out).events as { action: string }[];
+        const events = (JSON.parse(audit.out) as { readonly events: { readonly action: string }[] })
+          .events;
         expect(events.some((e) => e.action === "provision")).toBe(true);
       } finally {
         await fs.promises.rm(MAPPING_FILE, { force: true });

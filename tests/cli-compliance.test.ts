@@ -53,6 +53,14 @@ async function cli(
   return { code, out: io.output.join("\n"), err: io.errors.join("\n") };
 }
 
+/** Shape of the NDJSON body emitted by `authz compliance export --json`. */
+interface ComplianceExportBody {
+  readonly environment: string;
+  readonly activePolicyVersion: string | null;
+  readonly since?: string;
+  readonly events: readonly unknown[];
+}
+
 describe("compliance export (Phase 9)", () => {
   it("requires --store postgres", async () => {
     const result = await cli(["compliance export"]);
@@ -74,7 +82,7 @@ describe("compliance export (Phase 9)", () => {
         AUTHZ_DATABASE_URL: baseUrl,
       });
       expect(empty.code).toBe(EXIT.ok);
-      const body = JSON.parse(empty.out);
+      const body = JSON.parse(empty.out) as ComplianceExportBody;
       expect(body.environment).toBe("default");
       expect(body.activePolicyVersion).toBeNull();
       expect(Array.isArray(body.events)).toBe(true);
@@ -98,7 +106,7 @@ describe("compliance export (Phase 9)", () => {
       { AUTHZ_DATABASE_URL: baseUrl },
     );
     expect(filtered.code).toBe(EXIT.ok);
-    const body = JSON.parse(filtered.out);
+    const body = JSON.parse(filtered.out) as ComplianceExportBody;
     expect(body.since).toBe(future);
     expect(body.events).toHaveLength(0);
   });

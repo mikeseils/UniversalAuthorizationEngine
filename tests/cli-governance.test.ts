@@ -72,6 +72,12 @@ const V2_POLICY = [
   "",
 ].join("\n");
 
+/** Shape of the NDJSON body emitted by `authz policy-audit --json`. */
+interface AuditBody {
+  readonly environment: string;
+  readonly events: { readonly action: string; readonly version: string }[];
+}
+
 describe("policy-publish (Phase 9 governance)", () => {
   it("requires --store postgres", async () => {
     const result = await cli(["policy-publish", "policy.authz"]);
@@ -88,9 +94,9 @@ describe("policy-publish (Phase 9 governance)", () => {
   it.skipIf(PG_URL === undefined)(
     "publishes a version, activates it, and records the publish act",
     async () => {
-      await import("node:fs").then((fs) =>
-        fs.writeFileSync(`${GOV_DB}-policy.authz`, ACME_POLICY, "utf8"),
-      );
+      await import("node:fs").then((fs) => {
+        fs.writeFileSync(`${GOV_DB}-policy.authz`, ACME_POLICY, "utf8");
+      });
       try {
         const published = await cli(
           ["policy-publish", `${GOV_DB}-policy.authz`, "--store", "postgres"],
@@ -111,13 +117,15 @@ describe("policy-publish (Phase 9 governance)", () => {
           AUTHZ_DATABASE_URL: baseUrl,
         });
         expect(audit.code).toBe(EXIT.ok);
-        const events = JSON.parse(audit.out).events as { action: string; version: string }[];
+        const events = (JSON.parse(audit.out) as AuditBody).events;
         const actions = events.map((e) => e.action);
         expect(actions).toContain("publish");
         expect(actions).toContain("activate");
         expect(events.some((e) => e.version === "1")).toBe(true);
       } finally {
-        await import("node:fs").then((fs) => fs.rmSync(`${GOV_DB}-policy.authz`, { force: true }));
+        await import("node:fs").then((fs) => {
+          fs.rmSync(`${GOV_DB}-policy.authz`, { force: true });
+        });
       }
     },
   );
@@ -141,9 +149,9 @@ describe("policy-activate (Phase 9 governance)", () => {
       await cli(["policy-publish", `${GOV_DB}-policy.authz`, "--store", "postgres"], {
         AUTHZ_DATABASE_URL: baseUrl,
       });
-      await import("node:fs").then((fs) =>
-        fs.writeFileSync(`${GOV_DB}-v2.authz`, V2_POLICY, "utf8"),
-      );
+      await import("node:fs").then((fs) => {
+        fs.writeFileSync(`${GOV_DB}-v2.authz`, V2_POLICY, "utf8");
+      });
       try {
         const published = await cli(
           ["policy-publish", `${GOV_DB}-v2.authz`, "--store", "postgres"],
@@ -157,7 +165,9 @@ describe("policy-activate (Phase 9 governance)", () => {
         expect(result.code).toBe(EXIT.ok);
         expect(result.out).toContain("activated policy version 2");
       } finally {
-        await import("node:fs").then((fs) => fs.rmSync(`${GOV_DB}-v2.authz`, { force: true }));
+        await import("node:fs").then((fs) => {
+          fs.rmSync(`${GOV_DB}-v2.authz`, { force: true });
+        });
       }
     },
   );
@@ -180,7 +190,7 @@ describe("policy-audit (Phase 9 governance)", () => {
         AUTHZ_DATABASE_URL: baseUrl,
       });
       expect(audit.code).toBe(EXIT.ok);
-      const body = JSON.parse(audit.out);
+      const body = JSON.parse(audit.out) as AuditBody;
       expect(body.environment).toBe("default");
       expect(Array.isArray(body.events)).toBe(true);
       expect(body.events.length).toBeGreaterThanOrEqual(1);

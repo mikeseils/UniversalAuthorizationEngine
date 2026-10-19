@@ -80,7 +80,7 @@ export async function runComplianceExport(command: ParsedCommand, io: CliIo): Pr
       con.line(`  governance events: ${String(events.rows.length)}`);
       for (const row of events.rows) {
         con.line(
-          `  ${String(row.id).padEnd(4)} ${row.action.padEnd(9)} ${row.version}  ${row.actor}  ${row.created_at}`,
+          `  ${String(row.id).padEnd(4)} ${row.action.padEnd(9)} ${row.version}  ${row.actor}  ${row.created_at.toISOString()}`,
         );
       }
     }
