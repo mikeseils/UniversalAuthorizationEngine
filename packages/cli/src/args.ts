@@ -251,8 +251,38 @@ export const COMMANDS: readonly CommandSpec[] = [
     maxPositionals: 1,
     positionalName: "<mappingFile>",
   },
+  {
+    name: "compliance export",
+    summary: "Emit machine-readable compliance evidence as NDJSON (Phase 9)",
+    usage:
+      "authz compliance export [--store postgres] [--environment env] [--since timestamp] [--json]",
+    flags: [
+      {
+        name: "--store",
+        kind: "string",
+        value: "backend",
+        description: "store backend (postgres)",
+      },
+      {
+        name: "--environment",
+        kind: "string",
+        value: "env",
+        description: "governance environment (default default)",
+      },
+      {
+        name: "--since",
+        kind: "string",
+        value: "timestamp",
+        description: "only events at or after this ISO timestamp",
+      },
+      { name: "--json", kind: "boolean", description: "machine-readable output" },
+      NO_COLOR_FLAG,
+    ],
+    minPositionals: 0,
+    maxPositionals: 0,
+    positionalName: "",
+  },
 ];
-
 export interface ParsedCommand {
   readonly spec: CommandSpec;
   readonly flags: ReadonlyMap<string, string | true>;
