@@ -219,6 +219,38 @@ export const COMMANDS: readonly CommandSpec[] = [
     maxPositionals: 0,
     positionalName: "",
   },
+  {
+    name: "identities import",
+    summary:
+      "Import SCIM identity mappings (externalId -> subject ID) as idempotent mappedTo edges (Phase 9)",
+    usage:
+      "authz identities import <mappingFile> [--store postgres] [--environment env] [--actor name] [--json]",
+    flags: [
+      {
+        name: "--store",
+        kind: "string",
+        value: "backend",
+        description: "store backend (postgres)",
+      },
+      {
+        name: "--environment",
+        kind: "string",
+        value: "env",
+        description: "governance environment (default default)",
+      },
+      {
+        name: "--actor",
+        kind: "string",
+        value: "name",
+        description: "actor for the audit record (default operator)",
+      },
+      { name: "--json", kind: "boolean", description: "machine-readable output" },
+      NO_COLOR_FLAG,
+    ],
+    minPositionals: 1,
+    maxPositionals: 1,
+    positionalName: "<mappingFile>",
+  },
 ];
 
 export interface ParsedCommand {

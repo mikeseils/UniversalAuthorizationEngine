@@ -6,6 +6,7 @@ import { runInit } from "./commands/init.js";
 import { runPolicyActivate } from "./commands/policy-activate.js";
 import { runPolicyAudit } from "./commands/policy-audit.js";
 import { runPolicyPublish } from "./commands/policy-publish.js";
+import { runIdentitiesImport } from "./commands/identities-import.js";
 import { runTest } from "./commands/test.js";
 import { runValidate } from "./commands/validate.js";
 import { EXIT, CliError, HelpRequested, type ExitCode } from "./errors.js";
@@ -39,6 +40,8 @@ export async function run(argv: readonly string[], io: CliIo): Promise<ExitCode>
         return await runPolicyAudit(command, io);
       case "policy-publish":
         return await runPolicyPublish(command, io);
+      case "identities import":
+        return await runIdentitiesImport(command, io);
       default:
         return report(new CliError(`unhandled command "${command.spec.name}"`, EXIT.usage), io);
     }
