@@ -420,7 +420,7 @@ function assertCheckRequest(body: unknown): ClientRequest {
       }
     }
   }
-  return req as ClientRequest;
+  return req as unknown as ClientRequest;
 }
 
 async function readJsonBody(

@@ -21,6 +21,10 @@ export type StoreBackend = (typeof STORE_BACKENDS)[number];
 export const STORE_ENV = "AUTHZ_STORE";
 /** Environment variable holding the PostgreSQL connection string. */
 export const DATABASE_ENV = "AUTHZ_DATABASE_URL";
+/** Environment variable selecting the governance environment (default `default`). */
+export const ENVIRONMENT_ENV = "UAE_ENVIRONMENT";
+/** Environment variable naming the actor for governance audit records (default `operator`). */
+export const GOVERNANCE_ACTOR_ENV = "UAE_GOVERNANCE_ACTOR";
 
 /**
  * Resolve the backend from an explicit flag, then `AUTHZ_STORE`, then the

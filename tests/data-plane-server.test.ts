@@ -475,13 +475,25 @@ it("external identity claims gate the decision", async () => {
         }),
       });
     // Caller-supplied claim satisfies the policy-declared context schema.
-    expect((await (await post({ mfa: true })).json()).decision.allowed).toBe(true);
+    const allowedBody = (await (await post({ mfa: true })).json()) as {
+      decision: { allowed: boolean };
+    };
+    expect(allowedBody.decision.allowed).toBe(true);
     // Missing claim -> condition not satisfied -> DENY (fail-closed).
-    expect((await (await post(undefined)).json()).decision.allowed).toBe(false);
+    const missingBody = (await (await post(undefined)).json()) as {
+      decision: { allowed: boolean };
+    };
+    expect(missingBody.decision.allowed).toBe(false);
     // Wrong claim value -> DENY, never a silent ALLOW.
-    expect((await (await post({ mfa: false })).json()).decision.allowed).toBe(false);
+    const wrongBody = (await (await post({ mfa: false })).json()) as {
+      decision: { allowed: boolean };
+    };
+    expect(wrongBody.decision.allowed).toBe(false);
     // Type mismatch against the schema -> DENY, not 400 (policy-level).
-    expect((await (await post({ mfa: "yes" })).json()).decision.allowed).toBe(false);
+    const typeBody = (await (await post({ mfa: "yes" })).json()) as {
+      decision: { allowed: boolean };
+    };
+    expect(typeBody.decision.allowed).toBe(false);
   } finally {
     await server.close();
   }
